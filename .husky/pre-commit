@@ -1,0 +1,15 @@
+#!/bin/sh
+# Reject commits containing secret-like patterns
+FORBIDDEN=$(grep -rE \
+  "(ANTHROPIC_API_KEY|sk-ant-|AIza[0-9A-Za-z_-]{35}|ghp_[0-9A-Za-z]{36}|password\s*=\s*['\"][^'\"]{8,})" \
+  --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" \
+  --exclude-dir=node_modules --exclude-dir=.git \
+  . 2>/dev/null)
+
+if [ -n "$FORBIDDEN" ]; then
+  echo "Possible secret detected — remove before committing:"
+  echo "$FORBIDDEN"
+  exit 1
+fi
+
+npx lint-staged
