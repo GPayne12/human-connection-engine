@@ -24,6 +24,26 @@ Running log of significant choices, thesis-based reasoning, and trade-offs.
 
 ---
 
+## 2026-06-11 — Encryption: AES-GCM-256 with localStorage Key
+
+**Decision:** `notes` and `originStory` on Person are encrypted at rest using AES-GCM-256 via the Web Crypto API. The key is generated on first use and stored in `localStorage` as a JWK under `hce_field_key_v1`.
+
+**Reasoning:** Law #5 — sensitive notes about other humans must be encrypted at rest. Web Crypto is available in all target browsers with no dependencies.
+
+**Trade-off:** The key lives in `localStorage` in the same browser profile as the IndexedDB data. This protects against raw IndexedDB file extraction from disk, but not against a full browser profile compromise. A password-derived key (PBKDF2) would be stronger but adds a login friction step incompatible with the "open app before a coffee meeting" UX. Revisit for v2 if a biometric unlock or OS keychain integration becomes viable.
+
+---
+
+## 2026-06-11 — CampaignEntry Stage History is Append-Only
+
+**Decision:** `stageHistory` is an array embedded in the `CampaignEntry` row, not a separate table. Stage transitions are appended; nothing is deleted.
+
+**Reasoning:** The full audit trail of how a relationship progressed through a campaign is valuable context. Deletions would erase the story. Embedded array is simple and sufficient at this scale.
+
+**Trade-off:** Rows grow over time; not a concern until a single entry has hundreds of transitions, which would indicate a design problem (campaigns should close and recycle, not run forever).
+
+---
+
 ## 2026-06-10 — AI Provider Abstraction from Day One
 
 **Decision:** All Claude API calls go through `src/ai/provider.ts`; no component imports the Anthropic SDK directly.
