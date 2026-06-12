@@ -122,6 +122,27 @@ export interface ReciprocitySignal {
   balance: ReciprocityBalance;
 }
 
+// ── Snooze ────────────────────────────────────────────────────────────────────
+// Temporarily suppresses a person from the due list. Stored in IndexedDB.
+// The engine respects it as a pure input — it does not read from DB directly.
+
+export interface Snooze {
+  personId: string; // primary key
+  until: Date;
+}
+
+// ── DueItem ───────────────────────────────────────────────────────────────────
+// Engine output for the Today view. Everything needed to act without navigating away.
+
+export interface DueItem {
+  person: Person;
+  rule: CadenceRule;
+  healthScore: number; // 0–100
+  daysSinceContact: number;
+  daysOverdue: number; // days past intervalMin; negative = not yet due
+  lastInteraction?: Interaction; // warm-reentry context
+}
+
 // ── Encrypted field wrapper ───────────────────────────────────────────────────
 // Stored as-is in IndexedDB; the crypto module handles serialization.
 

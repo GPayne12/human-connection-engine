@@ -5,6 +5,7 @@ import type {
   Campaign,
   Interaction,
   Person,
+  Snooze,
 } from "../types";
 import { DEFAULT_CADENCE_RULES, SCHEMA_VERSION } from "../types";
 
@@ -25,6 +26,7 @@ export class HumanConnectionDB extends Dexie {
   cadenceRules!: EntityTable<CadenceRule, "tier">;
   campaigns!: EntityTable<Campaign, "id">;
   campaignEntries!: EntityTable<CampaignEntry, "id">;
+  snoozes!: EntityTable<Snooze, "personId">;
 
   constructor() {
     super("human-connection-engine");
@@ -37,6 +39,7 @@ export class HumanConnectionDB extends Dexie {
       cadenceRules: "&tier",
       campaigns: "&id",
       campaignEntries: "&id, campaignId, personId, [campaignId+personId]",
+      snoozes: "&personId, until",
     });
 
     this.on("populate", () => this.cadenceRules.bulkAdd(DEFAULT_CADENCE_RULES));

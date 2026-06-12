@@ -8,6 +8,7 @@ import type {
   CampaignEntry,
   CampaignStage,
   StageHistoryEntry,
+  Snooze,
 } from "../types";
 
 export { db };
@@ -145,4 +146,25 @@ export async function advanceCampaignEntryStage(
       entry.currentStage = toStage;
       entry.updatedAt = new Date();
     });
+}
+
+// ── Snooze ────────────────────────────────────────────────────────────────────
+
+export async function snoozePerson(
+  personId: string,
+  until: Date,
+): Promise<void> {
+  await db.snoozes.put({ personId, until });
+}
+
+export async function clearSnooze(personId: string): Promise<void> {
+  await db.snoozes.delete(personId);
+}
+
+export async function getSnooze(personId: string): Promise<Snooze | undefined> {
+  return db.snoozes.get(personId);
+}
+
+export async function getAllSnoozes(): Promise<Snooze[]> {
+  return db.snoozes.toArray();
 }
