@@ -168,3 +168,28 @@ export async function getSnooze(personId: string): Promise<Snooze | undefined> {
 export async function getAllSnoozes(): Promise<Snooze[]> {
   return db.snoozes.toArray();
 }
+
+// ── Bulk loaders (used by the app context to populate Maps) ───────────────────
+
+export async function getAllInteractions(): Promise<Interaction[]> {
+  return db.interactions.toArray();
+}
+
+export async function getAllCampaignEntries(): Promise<CampaignEntry[]> {
+  return db.campaignEntries.toArray();
+}
+
+export async function deleteInteraction(id: string): Promise<void> {
+  await db.interactions.delete(id);
+}
+
+export async function deleteCampaign(id: string): Promise<void> {
+  await db.transaction("rw", [db.campaigns, db.campaignEntries], async () => {
+    await db.campaigns.delete(id);
+    await db.campaignEntries.where("campaignId").equals(id).delete();
+  });
+}
+
+export async function deleteCampaignEntry(id: string): Promise<void> {
+  await db.campaignEntries.delete(id);
+}

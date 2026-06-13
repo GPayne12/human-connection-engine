@@ -36,12 +36,15 @@ async function getKey(): Promise<CryptoKey> {
   return _key;
 }
 
-function toBase64(buf: ArrayBuffer): string {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+function toBase64(buf: Uint8Array): string {
+  return btoa(String.fromCharCode(...buf));
 }
 
-function fromBase64(b64: string): Uint8Array {
-  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+function fromBase64(b64: string): Uint8Array<ArrayBuffer> {
+  const raw = atob(b64);
+  const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
 }
 
 export async function encryptField(plaintext: string): Promise<EncryptedField> {
@@ -53,7 +56,7 @@ export async function encryptField(plaintext: string): Promise<EncryptedField> {
     key,
     encoded,
   );
-  return { iv: toBase64(iv), ciphertext: toBase64(ciphertext) };
+  return { iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(ciphertext)) };
 }
 
 export async function decryptField(field: EncryptedField): Promise<string> {
