@@ -193,3 +193,42 @@ export async function deleteCampaign(id: string): Promise<void> {
 export async function deleteCampaignEntry(id: string): Promise<void> {
   await db.campaignEntries.delete(id);
 }
+
+// ── Bulk import (Layer 5) ────────────────────────────────────────────────────
+// Raw writes for restoring an export file: no updatedAt stamping, no
+// denormalization side effects (unlike upsertCampaign/addInteraction above),
+// because an import should reproduce the file's records exactly. Dexie's
+// bulkPut is insert-or-replace by primary key, so re-running an import is safe.
+
+export async function bulkImportPeople(people: Person[]): Promise<void> {
+  const stored = await Promise.all(people.map((p) => toStored(p)));
+  await db.people.bulkPut(stored);
+}
+
+export async function bulkImportInteractions(
+  interactions: Interaction[],
+): Promise<void> {
+  await db.interactions.bulkPut(interactions);
+}
+
+export async function bulkImportCadenceRules(
+  rules: CadenceRule[],
+): Promise<void> {
+  await db.cadenceRules.bulkPut(rules);
+}
+
+export async function bulkImportCampaigns(
+  campaigns: Campaign[],
+): Promise<void> {
+  await db.campaigns.bulkPut(campaigns);
+}
+
+export async function bulkImportCampaignEntries(
+  entries: CampaignEntry[],
+): Promise<void> {
+  await db.campaignEntries.bulkPut(entries);
+}
+
+export async function bulkImportSnoozes(snoozes: Snooze[]): Promise<void> {
+  await db.snoozes.bulkPut(snoozes);
+}
