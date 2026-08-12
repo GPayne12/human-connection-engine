@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   advanceCampaignStage,
+  daysInCurrentStage,
   InvalidStageTransitionError,
   isTerminalStage,
   validNextStages,
@@ -117,5 +118,24 @@ describe("isTerminalStage", () => {
         expect(isTerminalStage(s)).toBe(false);
       },
     );
+  });
+});
+
+describe("daysInCurrentStage", () => {
+  it("returns 0 immediately after entering a stage", () => {
+    const e = entry("warmup");
+    expect(daysInCurrentStage(e, e.updatedAt)).toBe(0);
+  });
+
+  it("counts days since updatedAt", () => {
+    const e = entry("warmup"); // updatedAt: 2025-01-01
+    const now = new Date("2025-01-15T00:00:00Z");
+    expect(daysInCurrentStage(e, now)).toBe(14);
+  });
+
+  it("reflects the reset updatedAt after a transition", () => {
+    const advanced = advanceCampaignStage(entry("research"), "warmup", NOW);
+    const later = new Date(NOW.getTime() + 5 * 86400_000);
+    expect(daysInCurrentStage(advanced, later)).toBe(5);
   });
 });

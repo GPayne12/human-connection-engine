@@ -9,6 +9,7 @@ export {
   advanceCampaignStage,
   validNextStages,
   isTerminalStage,
+  daysInCurrentStage,
   InvalidStageTransitionError,
 } from "./campaign";
 export { computeReciprocity } from "./reciprocity";

@@ -6,6 +6,7 @@ import {
   getAllPeople,
   getAllSnoozes,
   getCadenceRules,
+  GraphUnreachableError,
 } from "../db";
 import { getDueList } from "../engine";
 import type {
@@ -28,6 +29,7 @@ export interface AppData {
   campaignEntries: CampaignEntry[];
   dueList: DueItem[];
   loading: boolean;
+  error: string | null;
   refresh: () => Promise<void>;
 }
 
@@ -54,49 +56,66 @@ const EMPTY: LoadedState = {
 export function useAppData(): AppData {
   const [state, setData] = useState<LoadedState>(EMPTY);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
 
-    const [
-      allPeople,
-      allInteractions,
-      allRules,
-      allSnoozes,
-      allCampaigns,
-      allEntries,
-    ] = await Promise.all([
-      getAllPeople(),
-      getAllInteractions(),
-      getCadenceRules(),
-      getAllSnoozes(),
-      getAllCampaigns(),
-      getAllCampaignEntries(),
-    ]);
+    try {
+      const [
+        allPeople,
+        allInteractions,
+        allRules,
+        allSnoozes,
+        allCampaigns,
+        allEntries,
+      ] = await Promise.all([
+        getAllPeople(),
+        getAllInteractions(),
+        getCadenceRules(),
+        getAllSnoozes(),
+        getAllCampaigns(),
+        getAllCampaignEntries(),
+      ]);
 
-    const byPersonId = new Map<string, Interaction[]>();
-    for (const interaction of allInteractions) {
-      const list = byPersonId.get(interaction.personId) ?? [];
-      list.push(interaction);
-      byPersonId.set(interaction.personId, list);
+      const byPersonId = new Map<string, Interaction[]>();
+      for (const interaction of allInteractions) {
+        const list = byPersonId.get(interaction.personId) ?? [];
+        list.push(interaction);
+        byPersonId.set(interaction.personId, list);
+      }
+
+      const byTier = new Map<Tier, CadenceRule>(
+        allRules.map((r) => [r.tier, r]),
+      );
+      const bySnoozeId = new Map<string, Snooze>(
+        allSnoozes.map((s) => [s.personId, s]),
+      );
+      const due = getDueList(allPeople, byPersonId, byTier, bySnoozeId);
+
+      // Single setState call — avoids cascading renders flagged by react-hooks/set-state-in-effect
+      setData({
+        people: allPeople,
+        interactionsByPersonId: byPersonId,
+        rulesByTier: byTier,
+        snoozesByPersonId: bySnoozeId,
+        campaigns: allCampaigns,
+        campaignEntries: allEntries,
+        dueList: due,
+      });
+      setError(null);
+    } catch (err) {
+      // Stage 2 introduced a failure mode Dexie never had: the graph now
+      // lives behind a network call that can fail (service down, off the
+      // tailnet). Keep whatever was last loaded on screen and surface the
+      // failure rather than blanking the app.
+      setError(
+        err instanceof GraphUnreachableError
+          ? err.message
+          : "Failed to load the relationship graph.",
+      );
     }
 
-    const byTier = new Map<Tier, CadenceRule>(allRules.map((r) => [r.tier, r]));
-    const bySnoozeId = new Map<string, Snooze>(
-      allSnoozes.map((s) => [s.personId, s]),
-    );
-    const due = getDueList(allPeople, byPersonId, byTier, bySnoozeId);
-
-    // Single setState call — avoids cascading renders flagged by react-hooks/set-state-in-effect
-    setData({
-      people: allPeople,
-      interactionsByPersonId: byPersonId,
-      rulesByTier: byTier,
-      snoozesByPersonId: bySnoozeId,
-      campaigns: allCampaigns,
-      campaignEntries: allEntries,
-      dueList: due,
-    });
     setLoading(false);
   }, []);
 
@@ -105,5 +124,5 @@ export function useAppData(): AppData {
     refresh();
   }, [refresh]);
 
-  return { ...state, loading, refresh };
+  return { ...state, loading, error, refresh };
 }

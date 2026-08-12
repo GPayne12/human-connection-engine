@@ -29,8 +29,14 @@ import type {
   Campaign,
   CampaignEntry,
   Snooze,
-  StageHistoryEntry,
 } from "../types";
+import {
+  revivePerson,
+  reviveInteraction,
+  reviveCampaign,
+  reviveCampaignEntry,
+  reviveSnooze,
+} from "./dates";
 
 export interface ExportFile {
   schemaVersion: number;
@@ -92,27 +98,6 @@ export function serializeExport(file: ExportFile): string {
   return JSON.stringify(file, null, 2);
 }
 
-// Dates round-trip through JSON as ISO strings (JSON.stringify calls
-// Date#toJSON). This restores the named keys back to Date instances so
-// imported records match what the rest of the app expects.
-function reviveDates<T extends object>(
-  value: T,
-  dateKeys: readonly (keyof T)[],
-): T {
-  const revived: T = { ...value };
-  for (const key of dateKeys) {
-    const raw = revived[key];
-    if (typeof raw === "string") {
-      revived[key] = new Date(raw) as T[typeof key];
-    }
-  }
-  return revived;
-}
-
-function reviveStageHistory(history: StageHistoryEntry[]): StageHistoryEntry[] {
-  return history.map((h) => reviveDates(h, ["enteredAt"]));
-}
-
 export function parseExport(raw: string): ExportFile {
   let parsed: unknown;
   try {
@@ -148,27 +133,18 @@ export function parseExport(raw: string): ExportFile {
   return {
     schemaVersion: file.schemaVersion,
     exportedAt: file.exportedAt ?? new Date(0).toISOString(),
-    people: file.people!.map((p) =>
-      reviveDates(p, ["createdAt", "updatedAt", "lastContactDate"]),
-    ),
-    interactions: file.interactions!.map((i) =>
-      reviveDates(i, ["date", "createdAt"]),
-    ),
+    people: file.people!.map(revivePerson),
+    interactions: file.interactions!.map(reviveInteraction),
     cadenceRules: file.cadenceRules!,
-    campaigns: file.campaigns!.map((c) =>
-      reviveDates(c, ["createdAt", "updatedAt"]),
-    ),
-    campaignEntries: file.campaignEntries!.map((e) => ({
-      ...reviveDates(e, ["updatedAt"]),
-      stageHistory: reviveStageHistory(e.stageHistory),
-    })),
-    snoozes: file.snoozes!.map((s) => reviveDates(s, ["until"])),
+    campaigns: file.campaigns!.map(reviveCampaign),
+    campaignEntries: file.campaignEntries!.map(reviveCampaignEntry),
+    snoozes: file.snoozes!.map(reviveSnooze),
   };
 }
 
-// Insert-or-replace by primary key (Dexie bulkPut) — importing the same file
-// twice is safe. People first since nothing else in the app reads a row
-// before its Person exists; Dexie itself does not enforce the ordering.
+// Insert-or-replace by primary key — importing the same file twice is safe.
+// People first since nothing else in the app reads a row before its Person
+// exists; the store itself does not enforce the ordering.
 export async function importGraph(file: ExportFile): Promise<void> {
   await bulkImportPeople(file.people);
   await Promise.all([

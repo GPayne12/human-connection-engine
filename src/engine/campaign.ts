@@ -1,4 +1,5 @@
 import type { CampaignEntry, CampaignStage, StageHistoryEntry } from "../types";
+import { daysBetween } from "./health";
 
 // Valid forward transitions for each stage.
 // The map is intentionally exhaustive — unlisted targets are illegal.
@@ -63,4 +64,23 @@ export function validNextStages(currentStage: CampaignStage): CampaignStage[] {
  */
 export function isTerminalStage(stage: CampaignStage): boolean {
   return stage === "closed" || stage === "recycled";
+}
+
+/**
+ * Days since the entry moved into its current stage. `updatedAt` only ever
+ * changes on creation or a stage transition (see advanceCampaignEntryStage),
+ * so it doubles as "entered current stage at" without a dedicated field.
+ *
+ * The campaign board has no staleness signal today — cadence rules are
+ * calibrated for relationship maintenance (extended = 84-91 days), far too
+ * slow for an active campaign, and the due list has no notion of campaigns
+ * at all. This is the "days in current stage" count the Stage 2 roadmap
+ * flagged as the most valuable next increment once the graph moved off
+ * per-browser storage.
+ */
+export function daysInCurrentStage(
+  entry: CampaignEntry,
+  now: Date = new Date(),
+): number {
+  return daysBetween(entry.updatedAt, now);
 }

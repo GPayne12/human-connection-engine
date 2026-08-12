@@ -1,5 +1,21 @@
-import { db, type StoredPerson } from "./schema";
-import { encryptField, decryptField } from "./crypto";
+// Stage 2 — this module's exported function signatures are unchanged from
+// the Dexie/IndexedDB version (see git history). Internals now call the
+// graph service (src/api/graph.ts) instead of touching a local database
+// directly, which is the whole point of keeping this file the app's only
+// storage seam: no component, hook, or engine file needed to change.
+//
+// notes/originStory now travel as plaintext between the browser and the
+// service — encryption moved server-side (server/src/crypto.js). See
+// DECISIONS.md, "Stage 2 — server-side field encryption".
+
+import * as api from "../api/graph";
+import {
+  revivePerson,
+  reviveInteraction,
+  reviveCampaign,
+  reviveCampaignEntry,
+  reviveSnooze,
+} from "./dates";
 import type {
   Person,
   Interaction,
@@ -7,125 +23,87 @@ import type {
   Campaign,
   CampaignEntry,
   CampaignStage,
-  StageHistoryEntry,
   Snooze,
 } from "../types";
 
-export { db };
+export {
+  checkHealth,
+  GraphUnreachableError,
+  GraphServiceError,
+} from "../api/graph";
 
-// ── Person ────────────────────────────────────────────────────────────────────
-
-async function toStored(person: Person): Promise<StoredPerson> {
-  const [encNotes, encOrigin] = await Promise.all([
-    encryptField(person.notes),
-    encryptField(person.originStory),
-  ]);
-  return {
-    ...person,
-    notes: JSON.stringify(encNotes),
-    originStory: JSON.stringify(encOrigin),
-    lastContactDate: person.lastContactDate?.getTime(),
-  };
-}
-
-async function fromStored(stored: StoredPerson): Promise<Person> {
-  const [notes, originStory] = await Promise.all([
-    decryptField(JSON.parse(stored.notes)),
-    decryptField(JSON.parse(stored.originStory)),
-  ]);
-  return {
-    ...stored,
-    notes,
-    originStory,
-    lastContactDate: stored.lastContactDate
-      ? new Date(stored.lastContactDate)
-      : undefined,
-  };
-}
+// ── Person ────────────────────────────────────────────────────────────────
 
 export async function upsertPerson(person: Person): Promise<void> {
-  const stored = await toStored({ ...person, updatedAt: new Date() });
-  await db.people.put(stored);
+  await api.putPersonRaw(person.id, { ...person, updatedAt: new Date() });
 }
 
 export async function getPerson(id: string): Promise<Person | undefined> {
-  const stored = await db.people.get(id);
-  return stored ? fromStored(stored) : undefined;
+  const raw = await api.getPersonRaw<Person>(id);
+  return raw ? revivePerson(raw) : undefined;
 }
 
 export async function getAllPeople(): Promise<Person[]> {
-  const stored = await db.people.toArray();
-  return Promise.all(stored.map(fromStored));
+  const raw = await api.getAllPeopleRaw<Person>();
+  return raw.map(revivePerson);
 }
 
 export async function deletePerson(id: string): Promise<void> {
-  await db.transaction(
-    "rw",
-    [db.people, db.interactions, db.campaignEntries],
-    async () => {
-      await Promise.all([
-        db.people.delete(id),
-        db.interactions.where("personId").equals(id).delete(),
-        db.campaignEntries.where("personId").equals(id).delete(),
-      ]);
-    },
-  );
+  await api.deletePersonRaw(id);
 }
 
-// ── Interaction ───────────────────────────────────────────────────────────────
+// ── Interaction ───────────────────────────────────────────────────────────
 
 export async function addInteraction(interaction: Interaction): Promise<void> {
-  await db.transaction("rw", [db.interactions, db.people], async () => {
-    await db.interactions.add(interaction);
-    // Keep lastContactDate denormalized on Person for fast engine queries
-    await db.people
-      .where("id")
-      .equals(interaction.personId)
-      .modify((p: StoredPerson) => {
-        const ts = new Date(interaction.date).getTime();
-        if (!p.lastContactDate || ts > p.lastContactDate) {
-          p.lastContactDate = ts;
-        }
-      });
-  });
+  // Denormalizing lastContactDate onto Person happens server-side (POST
+  // /interactions) so it stays atomic with the write, same as the old
+  // single Dexie transaction did.
+  await api.postInteractionRaw(interaction);
 }
 
 export async function getInteractionsForPerson(
   personId: string,
 ): Promise<Interaction[]> {
-  return db.interactions.where("personId").equals(personId).sortBy("date");
+  const raw = await api.getInteractionsForPersonRaw<Interaction>(personId);
+  return raw.map(reviveInteraction);
 }
 
-// ── CadenceRule ───────────────────────────────────────────────────────────────
+// ── CadenceRule ───────────────────────────────────────────────────────────
 
 export async function getCadenceRules(): Promise<CadenceRule[]> {
-  return db.cadenceRules.toArray();
+  return api.getCadenceRulesRaw<CadenceRule>();
 }
 
 export async function upsertCadenceRule(rule: CadenceRule): Promise<void> {
-  await db.cadenceRules.put(rule);
+  await api.putCadenceRuleRaw(rule.tier, rule);
 }
 
-// ── Campaign ──────────────────────────────────────────────────────────────────
+// ── Campaign ──────────────────────────────────────────────────────────────
 
 export async function upsertCampaign(campaign: Campaign): Promise<void> {
-  await db.campaigns.put({ ...campaign, updatedAt: new Date() });
+  await api.putCampaignRaw(campaign.id, { ...campaign, updatedAt: new Date() });
 }
 
 export async function getAllCampaigns(): Promise<Campaign[]> {
-  return db.campaigns.toArray();
+  const raw = await api.getAllCampaignsRaw<Campaign>();
+  return raw.map(reviveCampaign);
 }
 
-// ── CampaignEntry ─────────────────────────────────────────────────────────────
+export async function deleteCampaign(id: string): Promise<void> {
+  await api.deleteCampaignRaw(id);
+}
+
+// ── CampaignEntry ─────────────────────────────────────────────────────────
 
 export async function upsertCampaignEntry(entry: CampaignEntry): Promise<void> {
-  await db.campaignEntries.put({ ...entry, updatedAt: new Date() });
+  await api.putCampaignEntryRaw(entry.id, { ...entry, updatedAt: new Date() });
 }
 
 export async function getCampaignEntries(
   campaignId: string,
 ): Promise<CampaignEntry[]> {
-  return db.campaignEntries.where("campaignId").equals(campaignId).toArray();
+  const raw = await api.getCampaignEntriesRaw<CampaignEntry>(campaignId);
+  return raw.map(reviveCampaignEntry);
 }
 
 export async function advanceCampaignEntryStage(
@@ -133,102 +111,86 @@ export async function advanceCampaignEntryStage(
   toStage: CampaignStage,
   note?: string,
 ): Promise<void> {
-  await db.campaignEntries
-    .where("id")
-    .equals(entryId)
-    .modify((entry: CampaignEntry) => {
-      const historyEntry: StageHistoryEntry = {
-        stage: entry.currentStage,
-        enteredAt: entry.updatedAt,
-        note,
-      };
-      entry.stageHistory = [...entry.stageHistory, historyEntry];
-      entry.currentStage = toStage;
-      entry.updatedAt = new Date();
-    });
+  await api.advanceCampaignEntryRaw(entryId, toStage, note);
 }
 
-// ── Snooze ────────────────────────────────────────────────────────────────────
+export async function deleteCampaignEntry(id: string): Promise<void> {
+  await api.deleteCampaignEntryRaw(id);
+}
+
+// ── Snooze ────────────────────────────────────────────────────────────────
 
 export async function snoozePerson(
   personId: string,
   until: Date,
 ): Promise<void> {
-  await db.snoozes.put({ personId, until });
+  await api.putSnoozeRaw(personId, { personId, until });
 }
 
 export async function clearSnooze(personId: string): Promise<void> {
-  await db.snoozes.delete(personId);
+  await api.clearSnoozeRaw(personId);
 }
 
 export async function getSnooze(personId: string): Promise<Snooze | undefined> {
-  return db.snoozes.get(personId);
+  const raw = await api.getSnoozeRaw<Snooze>(personId);
+  return raw ? reviveSnooze(raw) : undefined;
 }
 
 export async function getAllSnoozes(): Promise<Snooze[]> {
-  return db.snoozes.toArray();
+  const raw = await api.getAllSnoozesRaw<Snooze>();
+  return raw.map(reviveSnooze);
 }
 
 // ── Bulk loaders (used by the app context to populate Maps) ───────────────────
 
 export async function getAllInteractions(): Promise<Interaction[]> {
-  return db.interactions.toArray();
+  const raw = await api.getAllInteractionsRaw<Interaction>();
+  return raw.map(reviveInteraction);
 }
 
 export async function getAllCampaignEntries(): Promise<CampaignEntry[]> {
-  return db.campaignEntries.toArray();
+  const raw = await api.getAllCampaignEntriesRaw<CampaignEntry>();
+  return raw.map(reviveCampaignEntry);
 }
 
 export async function deleteInteraction(id: string): Promise<void> {
-  await db.interactions.delete(id);
-}
-
-export async function deleteCampaign(id: string): Promise<void> {
-  await db.transaction("rw", [db.campaigns, db.campaignEntries], async () => {
-    await db.campaigns.delete(id);
-    await db.campaignEntries.where("campaignId").equals(id).delete();
-  });
-}
-
-export async function deleteCampaignEntry(id: string): Promise<void> {
-  await db.campaignEntries.delete(id);
+  await api.deleteInteractionRaw(id);
 }
 
 // ── Bulk import (Layer 5) ────────────────────────────────────────────────────
 // Raw writes for restoring an export file: no updatedAt stamping, no
-// denormalization side effects (unlike upsertCampaign/addInteraction above),
-// because an import should reproduce the file's records exactly. Dexie's
-// bulkPut is insert-or-replace by primary key, so re-running an import is safe.
+// denormalization side effects, because an import should reproduce the
+// file's records exactly. The service's bulk routes are insert-or-replace
+// by primary key, so re-running an import is safe.
 
 export async function bulkImportPeople(people: Person[]): Promise<void> {
-  const stored = await Promise.all(people.map((p) => toStored(p)));
-  await db.people.bulkPut(stored);
+  await api.bulkPutPeopleRaw(people);
 }
 
 export async function bulkImportInteractions(
   interactions: Interaction[],
 ): Promise<void> {
-  await db.interactions.bulkPut(interactions);
+  await api.bulkPutInteractionsRaw(interactions);
 }
 
 export async function bulkImportCadenceRules(
   rules: CadenceRule[],
 ): Promise<void> {
-  await db.cadenceRules.bulkPut(rules);
+  await api.bulkPutCadenceRulesRaw(rules);
 }
 
 export async function bulkImportCampaigns(
   campaigns: Campaign[],
 ): Promise<void> {
-  await db.campaigns.bulkPut(campaigns);
+  await api.bulkPutCampaignsRaw(campaigns);
 }
 
 export async function bulkImportCampaignEntries(
   entries: CampaignEntry[],
 ): Promise<void> {
-  await db.campaignEntries.bulkPut(entries);
+  await api.bulkPutCampaignEntriesRaw(entries);
 }
 
 export async function bulkImportSnoozes(snoozes: Snooze[]): Promise<void> {
-  await db.snoozes.bulkPut(snoozes);
+  await api.bulkPutSnoozesRaw(snoozes);
 }

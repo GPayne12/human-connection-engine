@@ -51,3 +51,17 @@ Running log of significant choices, thesis-based reasoning, and trade-offs.
 **Reasoning:** Design law #4 — "build a thin provider abstraction so models can be swapped as the race churns." The Fable 5 window will end June 23; subsequent sessions may use different models.
 
 **Trade-off:** Slight indirection overhead. Worth it: the abstraction is thin and the switching cost without it is high.
+
+---
+
+## 2026-08-12 — Stage 2: Storage Moves to a Local Service; Field Encryption Moves Server-Side
+
+**Decision:** The relationship graph moved off per-browser IndexedDB (`src/db/schema.ts`, deleted) to a small single-user Express service (`server/`), reachable at `http://127.0.0.1:5199` by default, backed by a JSON file (`~/Library/Application Support/human-connection-engine/graph.json`) rather than SQLite at this data volume. `src/db/index.ts` keeps every exported function signature identical — it now calls `src/api/graph.ts` instead of Dexie — so no component, hook, or engine file changed.
+
+`notes`/`originStory` encryption (AES-GCM-256) moved from the browser (`src/db/crypto.ts`, deleted, key in `localStorage`) to the service (`server/src/crypto.js`, key in a chmod-0600 file next to the graph). The browser now sends and receives these fields as plaintext over the connection to the service.
+
+**Reasoning:** The alternative — keep encrypting client-side and have the service store ciphertext — reopens the key-portability problem this was supposed to solve: two browsers (GDesk, GLap) would need the _same_ AES key, which means a password-derived key entered on each one. That's the login step the original 2026-06-11 encryption decision explicitly rejected for the "open it two minutes before a coffee" use case, and multi-device access was the entire point of Stage 2. Server-side encryption keeps that UX intact — Law 5 ("encrypted at rest") is still satisfied, just by the service rather than the browser — and the service is loopback-only, reached from a second machine via an SSH tunnel (same pattern as the dev-dashboard tunnel), not a LAN-exposed bind.
+
+**Trade-off:** The trust boundary changes from "only this browser can ever read this" to "only this service on this machine can." Anyone who can reach the service (this machine's local user, or anyone who can open an SSH tunnel to it) can read plaintext notes for the duration of a request. Accepted: the service still never persists plaintext to disk, and the alternative traded this for a UX regression the app was explicitly designed to avoid. Revisit if the tailnet ever needs to include an untrusted device.
+
+**Also decided:** Law 1's ESLint rule (`no fetch outside src/api/`) needed no amendment. The new HTTP calls live in `src/api/graph.ts`, which was already the sanctioned location — `src/db/index.ts` calls into it rather than calling `fetch` itself. Law 1's actual substance ("no agent may trigger outreach") was never about local-service plumbing, just about where network calls are allowed to originate from in the source tree.

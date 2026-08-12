@@ -8,12 +8,14 @@ import {
 } from "../../db";
 import {
   advanceCampaignStage,
+  daysInCurrentStage,
+  isTerminalStage,
   InvalidStageTransitionError,
 } from "../../engine";
 import { useApp } from "../../context/AppContext";
 import { TierBadge } from "../ui/Badge";
 import { Modal } from "../ui/Modal";
-import type { CampaignStage, Person } from "../../types";
+import type { CampaignEntry, CampaignStage, Person } from "../../types";
 
 const STAGES: CampaignStage[] = [
   "research",
@@ -302,6 +304,7 @@ export function CampaignBoard() {
                       <CampaignCard
                         key={entry.id}
                         person={person}
+                        entry={entry}
                         onDragStart={() => {
                           draggedEntryId.current = entry.id;
                         }}
@@ -347,16 +350,26 @@ export function CampaignBoard() {
   );
 }
 
+// A campaign entry sitting in one stage this long without moving is worth
+// flagging — roughly the inner-tier cadence window, on the theory that an
+// active campaign shouldn't sit still longer than you'd let a close contact go.
+const STALE_AFTER_DAYS = 14;
+
 function CampaignCard({
   person,
+  entry,
   onDragStart,
   onRemove,
 }: {
   person: Person;
+  entry: CampaignEntry;
   onDragStart: () => void;
   onRemove: () => void;
 }) {
   const [showRemove, setShowRemove] = useState(false);
+  const daysInStage = daysInCurrentStage(entry);
+  const stale =
+    !isTerminalStage(entry.currentStage) && daysInStage >= STALE_AFTER_DAYS;
 
   return (
     <div
@@ -373,8 +386,14 @@ function CampaignCard({
       >
         {person.name}
       </Link>
-      <div className="mt-1">
+      <div className="mt-1 flex items-center gap-1.5">
         <TierBadge tier={person.tier} />
+        <span
+          className={`text-xs ${stale ? "font-medium text-amber-600 dark:text-amber-400" : "text-slate-400"}`}
+          title={`Entered this stage ${daysInStage} day${daysInStage === 1 ? "" : "s"} ago`}
+        >
+          {daysInStage}d
+        </span>
       </div>
       {showRemove && (
         <button

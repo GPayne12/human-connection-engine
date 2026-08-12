@@ -1,0 +1,14 @@
+{
+  "name": "hce-graph-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "commonjs",
+  "description": "Single-user local service that holds the Human Connection Engine relationship graph. Replaces the browser's IndexedDB store (Stage 2 of Layer 5) so it can be reached from more than one browser/machine over the tailnet.",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

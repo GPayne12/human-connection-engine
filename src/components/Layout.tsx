@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
+import { useApp } from "../context/AppContext";
 
 const NAV = [
   { to: "/", label: "Today", exact: true },
@@ -34,6 +35,8 @@ function NavItem({
 }
 
 export function Layout() {
+  const { error, refresh } = useApp();
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-50 dark:bg-slate-900">
       {/* Header */}
@@ -48,6 +51,17 @@ export function Layout() {
             ))}
           </nav>
         </div>
+        {error && (
+          <div className="flex items-center justify-between gap-4 border-t border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300">
+            <span>{error}</span>
+            <button
+              onClick={() => refresh()}
+              className="shrink-0 rounded border border-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100 dark:border-red-700 dark:hover:bg-red-900/50"
+            >
+              Retry
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Page content */}
