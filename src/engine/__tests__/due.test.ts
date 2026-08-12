@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getDueList, isDueForContact, isSnoozeActive } from "../due";
+import {
+  daysUntilNextDue,
+  getDueList,
+  isDueForContact,
+  isSnoozeActive,
+} from "../due";
 import type {
   CadenceRule,
   Interaction,
@@ -202,5 +207,68 @@ describe("getDueList", () => {
       NOW,
     );
     expect(result[0].person.id).toBe("inner");
+  });
+});
+
+describe("daysUntilNextDue", () => {
+  const rules: Map<Tier, CadenceRule> = new Map([
+    ["inner", innerRule],
+    ["active", activeRule],
+  ]);
+
+  it("returns undefined with no people", () => {
+    expect(daysUntilNextDue([], new Map(), rules, new Map(), NOW)).toBe(
+      undefined,
+    );
+  });
+
+  it("counts days remaining until the cadence interval is reached", () => {
+    const p = person("p1"); // inner, min 14
+    const byId = new Map([["p1", [interaction("p1", 4)]]]);
+    expect(daysUntilNextDue([p], byId, rules, new Map(), NOW)).toBe(10);
+  });
+
+  it("returns 0 for someone already due", () => {
+    const p = person("p1");
+    const byId = new Map([["p1", [interaction("p1", 20)]]]);
+    expect(daysUntilNextDue([p], byId, rules, new Map(), NOW)).toBe(0);
+  });
+
+  it("returns the soonest across several people", () => {
+    const a = person("a", "inner"); // min 14, contacted 4d ago -> 10
+    const b = person("b", "active"); // min 42, contacted 40d ago -> 2
+    const byId = new Map([
+      ["a", [interaction("a", 4)]],
+      ["b", [interaction("b", 40)]],
+    ]);
+    expect(daysUntilNextDue([a, b], byId, rules, new Map(), NOW)).toBe(2);
+  });
+
+  it("defers to snooze expiry when it falls after the cadence date", () => {
+    const p = person("p1"); // already due by cadence
+    const byId = new Map([["p1", [interaction("p1", 20)]]]);
+    const snoozes = new Map<string, Snooze>([
+      [
+        "p1",
+        { personId: "p1", until: new Date(NOW.getTime() + 5 * 86400_000) },
+      ],
+    ]);
+    expect(daysUntilNextDue([p], byId, rules, snoozes, NOW)).toBe(5);
+  });
+
+  it("ignores an expired snooze", () => {
+    const p = person("p1");
+    const byId = new Map([["p1", [interaction("p1", 20)]]]);
+    const snoozes = new Map<string, Snooze>([
+      ["p1", { personId: "p1", until: new Date(NOW.getTime() - 86400_000) }],
+    ]);
+    expect(daysUntilNextDue([p], byId, rules, snoozes, NOW)).toBe(0);
+  });
+
+  it("skips people whose tier has no rule", () => {
+    const p = person("p1", "dormant"); // no dormant rule in this map
+    expect(daysUntilNextDue([p], new Map(), rules, new Map(), NOW)).toBe(
+      undefined,
+    );
   });
 });

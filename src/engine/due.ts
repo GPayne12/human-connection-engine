@@ -102,5 +102,39 @@ export function snoozeExpiresAt(
   return new Date(snooze!.until);
 }
 
+/**
+ * Days until the next person comes due, or undefined with no people.
+ * Feeds the Today view's empty state so "nothing due" can say when that
+ * changes instead of implying the work is done. A snoozed person's re-entry
+ * is whichever is later: their cadence due date or their snooze expiry.
+ */
+export function daysUntilNextDue(
+  people: Person[],
+  interactionsByPersonId: Map<string, Interaction[]>,
+  rulesByTier: Map<Tier, CadenceRule>,
+  snoozesByPersonId: Map<string, Snooze>,
+  now: Date = new Date(),
+): number | undefined {
+  let min: number | undefined;
+  for (const person of people) {
+    const rule = rulesByTier.get(person.tier);
+    if (!rule) continue;
+    const interactions = interactionsByPersonId.get(person.id) ?? [];
+    const daysSince = daysBetween(lastContactDate(person, interactions), now);
+    let dueIn = Math.max(0, rule.intervalMinDays - daysSince);
+
+    const expiry = snoozeExpiresAt(snoozesByPersonId.get(person.id), now);
+    if (expiry) {
+      const snoozeDays = Math.ceil(
+        (expiry.getTime() - now.getTime()) / 86400_000,
+      );
+      dueIn = Math.max(dueIn, snoozeDays);
+    }
+
+    if (min === undefined || dueIn < min) min = dueIn;
+  }
+  return min;
+}
+
 export { isSnoozeActive };
 export type { DueItem };

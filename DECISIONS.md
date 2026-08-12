@@ -93,3 +93,23 @@ The Quantic MSAIE concentration project (due 2026-09-13) is a **separate track**
 **Reasoning:** Every message is currently drafted from scratch — the biggest named friction in campaign mode — and pre-contact preparation is where an AI layer serves the "two minutes before a coffee" use case without touching the human-terminal rule. Law 1 stands untouched: the app has no send button and never will; the lint rule keeps all network calls in `src/api/`. Law 5's disclosure ("what was sent to the model") appears on every call.
 
 **Trade-off:** Context refresh is the only capability where graph data (a contact's name/company) leaves the machine, to a third-party model with web search. Bounded: it fires only on an explicit click, never on a schedule, and the disclosure shows the exact query. Accepted — the value of fresh context for a warmup message that lands as genuine attention outweighs a per-click, disclosed, user-initiated lookup. Revisit if a local-model option becomes practical.
+
+---
+
+## 2026-08-12 — The Origin-Story Toll Gate
+
+**Decision:** `originStory` is required everywhere except the `dormant` tier. Bulk-imported contacts land in dormant with the field empty; **promoting a person to any other tier, or placing them on a campaign board, requires writing their origin story first** — in the user's own words, in the form, at that moment. The campaign "Add person" modal surfaces the field inline when the selected person has no story, and will not submit without it.
+
+**Reasoning:** Bulk import is about to make mostly-empty origin stories statistically normal, which would quietly erode the field the schema calls "irreplaceable — AI cannot regenerate this." A hard requirement on every person would make import impossible; no requirement would make the field vestigial. Gating on _promotion_ puts the toll exactly where a stranger becomes someone the practice is actually working — and turns the standing no-fabrication rule from a prohibition into a practice of remembering. It is the most humanizing mechanic available and it costs one form field.
+
+**Trade-off:** Friction at the exact moment of enthusiasm — placing someone on a board now requires a sentence of real recall first. Accepted, and in fact the point: a person who cannot be described is a person not ready to be campaigned at. Dormant remains a legitimate long-term home for contacts whose story hasn't been written yet; nothing forces the toll to be paid on a schedule.
+
+---
+
+## 2026-08-12 — Today and the Board Read Each Other; Empty States Tell the Truth
+
+**Decision:** The two loops are joined at the card level rather than merged. A Today due card shows the person's active campaign placements (campaign name + current stage) and their origin story; a campaign board card shows a `● due` marker when that person is on today's due list. Terminal stages (`closed`, `recycled`) are excluded from both directions. Separately, Today's empty state no longer says "All caught up" — it reports when the next person comes due, how many people are on campaign boards (flagging zero as a problem, not a success), and how many contacts are still waiting for an origin story.
+
+**Reasoning:** The activation handoff identified that the board drives campaign work while the due list drives maintenance, and that the two have no awareness of each other at the moment decisions get made. Joining them at the card is enough — a full merge would compromise the cadence engine's purity, which is calibrated for relationship maintenance and correctly so. On the empty state: during a bridge campaign, an empty queue usually means the campaigns aren't feeding it, and a UI that congratulates the user for that is lying. The tool should be able to notice its own neglect.
+
+**Trade-off:** The due card is denser, and the empty state is no longer reassuring. Both accepted deliberately — this is an instrument for one user who needs the truth more than the comfort, and the failure mode this project has already demonstrated once is abandonment, not overload.

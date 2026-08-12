@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { snoozePerson } from "../../db";
 import { useApp } from "../../context/AppContext";
+import { daysUntilNextDue, isTerminalStage } from "../../engine";
 import { HealthBar } from "../ui/HealthBar";
 import { TierBadge } from "../ui/Badge";
 import { Modal } from "../ui/Modal";
@@ -32,8 +33,16 @@ function DueCard({
   item: DueItem;
   onRefresh: () => void;
 }) {
+  const { campaigns, campaignEntries } = useApp();
   const [logging, setLogging] = useState(false);
   const [snoozing, setSnoozing] = useState(false);
+
+  // The due card leads with the person: campaign position joins the card so
+  // cadence and campaign work stop being disjoint loops, and the origin
+  // story — how you met — is in view at the moment you decide how to reach out.
+  const activeEntries = campaignEntries.filter(
+    (e) => e.personId === item.person.id && !isTerminalStage(e.currentStage),
+  );
 
   async function handleSnooze(days: number) {
     const until = new Date();
@@ -73,6 +82,29 @@ function DueCard({
           <span>·</span>
           <span>Last contact {daysLabel(item.daysSinceContact)}</span>
         </div>
+
+        {activeEntries.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {activeEntries.map((entry) => {
+              const campaign = campaigns.find((c) => c.id === entry.campaignId);
+              return (
+                <span
+                  key={entry.id}
+                  className="rounded-full bg-purple-50 px-2 py-0.5 text-xs text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                >
+                  {campaign?.name ?? "Campaign"} ·{" "}
+                  <span className="capitalize">{entry.currentStage}</span>
+                </span>
+              );
+            })}
+          </div>
+        )}
+
+        {item.person.originStory && (
+          <p className="mt-2 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">
+            {item.person.originStory}
+          </p>
+        )}
 
         {item.lastInteraction && (
           <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-sm italic text-slate-600 dark:bg-slate-700/50 dark:text-slate-300">
@@ -187,36 +219,93 @@ export function TodayView() {
   );
 }
 
+// An empty Today during an active campaign is not peace — it may mean the
+// campaigns aren't feeding the queue. This state tells the truth about why
+// nothing is due and what would change that, instead of implying the work
+// of the practice is done.
 function EmptyState() {
-  const { people } = useApp();
+  const {
+    people,
+    interactionsByPersonId,
+    rulesByTier,
+    snoozesByPersonId,
+    campaignEntries,
+  } = useApp();
+
+  if (people.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center dark:border-slate-600">
+        <p className="font-medium text-slate-700 dark:text-slate-300">
+          No relationships yet
+        </p>
+        <p className="mt-1 text-sm text-slate-500">
+          Add your first contact to start tracking your cadence.
+        </p>
+        <Link
+          to="/people/new"
+          className="mt-4 inline-block rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+        >
+          Add first person
+        </Link>
+      </div>
+    );
+  }
+
+  const onBoards = new Set(
+    campaignEntries
+      .filter((e) => !isTerminalStage(e.currentStage))
+      .map((e) => e.personId),
+  ).size;
+  const unwrittenStories = people.filter((p) => !p.originStory.trim()).length;
+  const nextDue = daysUntilNextDue(
+    people,
+    interactionsByPersonId,
+    rulesByTier,
+    snoozesByPersonId,
+  );
+
   return (
     <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center dark:border-slate-600">
-      {people.length === 0 ? (
-        <>
-          <p className="font-medium text-slate-700 dark:text-slate-300">
-            No relationships yet
+      <p className="font-medium text-slate-700 dark:text-slate-300">
+        Nothing due today
+      </p>
+      <div className="mx-auto mt-3 max-w-sm space-y-1.5 text-sm text-slate-500 dark:text-slate-400">
+        {nextDue !== undefined && (
+          <p>
+            Next person comes due{" "}
+            {nextDue === 0
+              ? "today"
+              : nextDue === 1
+                ? "tomorrow"
+                : `in ${nextDue} days`}
+            .
           </p>
-          <p className="mt-1 text-sm text-slate-500">
-            Add your first contact to start tracking your cadence.
+        )}
+        {onBoards === 0 ? (
+          <p className="text-amber-600 dark:text-amber-400">
+            No one is on a campaign board — this queue only fills if the
+            campaigns feed it.{" "}
+            <Link
+              to="/campaigns"
+              className="underline hover:text-amber-700 dark:hover:text-amber-300"
+            >
+              Place people →
+            </Link>
           </p>
-          <Link
-            to="/people/new"
-            className="mt-4 inline-block rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            Add first person
-          </Link>
-        </>
-      ) : (
-        <>
-          <p className="text-2xl">✓</p>
-          <p className="mt-2 font-medium text-slate-700 dark:text-slate-300">
-            All caught up
+        ) : (
+          <p>
+            {onBoards} {onBoards === 1 ? "person is" : "people are"} working
+            through campaigns.
           </p>
-          <p className="mt-1 text-sm text-slate-500">
-            No relationships due for contact right now.
+        )}
+        {unwrittenStories > 0 && (
+          <p>
+            {unwrittenStories}{" "}
+            {unwrittenStories === 1 ? "contact is" : "contacts are"} waiting for
+            an origin story.
           </p>
-        </>
-      )}
+        )}
+      </div>
     </div>
   );
 }

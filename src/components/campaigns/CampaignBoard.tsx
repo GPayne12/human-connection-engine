@@ -5,6 +5,7 @@ import {
   deleteCampaignEntry,
   upsertCampaign,
   upsertCampaignEntry,
+  upsertPerson,
 } from "../../db";
 import {
   advanceCampaignStage,
@@ -109,14 +110,24 @@ function AddPersonModal({
   onDone: () => void;
 }) {
   const [personId, setPersonId] = useState("");
+  const [originStory, setOriginStory] = useState("");
   const [saving, setSaving] = useState(false);
 
   const available = people.filter((p) => !existingPersonIds.has(p.id));
+  const selected = available.find((p) => p.id === personId);
+  // The origin-story toll gate (DECISIONS.md 2026-08-12): joining a campaign
+  // is the moment a person becomes real to the practice — the story gets
+  // written here, in the user's words, or the placement doesn't happen.
+  const needsStory = selected !== undefined && !selected.originStory.trim();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!personId) return;
+    if (needsStory && !originStory.trim()) return;
     setSaving(true);
+    if (needsStory && selected) {
+      await upsertPerson({ ...selected, originStory: originStory.trim() });
+    }
     await upsertCampaignEntry({
       id: crypto.randomUUID(),
       campaignId,
@@ -144,7 +155,10 @@ function AddPersonModal({
         ) : (
           <select
             value={personId}
-            onChange={(e) => setPersonId(e.target.value)}
+            onChange={(e) => {
+              setPersonId(e.target.value);
+              setOriginStory("");
+            }}
             required
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
           >
@@ -158,10 +172,29 @@ function AddPersonModal({
           </select>
         )}
       </div>
+      {needsStory && selected && (
+        <div>
+          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
+            Origin story first <span className="text-red-500">*</span>
+          </label>
+          <textarea
+            value={originStory}
+            onChange={(e) => setOriginStory(e.target.value)}
+            placeholder="How did you meet? What made this relationship matter?"
+            rows={2}
+            required
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-500"
+          />
+          <p className="mt-1 text-xs text-slate-400">
+            {selected.name} can't join a campaign without one — how you met is
+            the one thing this tool can't regenerate. Encrypted.
+          </p>
+        </div>
+      )}
       {available.length > 0 && (
         <button
           type="submit"
-          disabled={saving || !personId}
+          disabled={saving || !personId || (needsStory && !originStory.trim())}
           className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {saving ? "Adding…" : "Add to campaign"}
@@ -172,7 +205,8 @@ function AddPersonModal({
 }
 
 export function CampaignBoard() {
-  const { campaigns, campaignEntries, people, loading, refresh } = useApp();
+  const { campaigns, campaignEntries, people, dueList, loading, refresh } =
+    useApp();
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null);
   const [creatingCampaign, setCreatingCampaign] = useState(false);
   const [addingPerson, setAddingPerson] = useState(false);
@@ -194,6 +228,10 @@ export function CampaignBoard() {
     : [];
 
   const existingPersonIds = new Set(boardEntries.map((e) => e.personId));
+  // The board learns about due-ness: a card whose person is on today's due
+  // list carries a marker, so campaign work and cadence stop being two
+  // disjoint loops at the exact pixel where decisions get made.
+  const duePersonIds = new Set(dueList.map((d) => d.person.id));
 
   async function handleDrop(toStage: CampaignStage, entryId: string) {
     const entry = boardEntries.find((e) => e.id === entryId);
@@ -305,6 +343,7 @@ export function CampaignBoard() {
                         key={entry.id}
                         person={person}
                         entry={entry}
+                        isDue={duePersonIds.has(person.id)}
                         onDragStart={() => {
                           draggedEntryId.current = entry.id;
                         }}
@@ -358,11 +397,13 @@ const STALE_AFTER_DAYS = 14;
 function CampaignCard({
   person,
   entry,
+  isDue,
   onDragStart,
   onRemove,
 }: {
   person: Person;
   entry: CampaignEntry;
+  isDue: boolean;
   onDragStart: () => void;
   onRemove: () => void;
 }) {
@@ -370,6 +411,7 @@ function CampaignCard({
   const daysInStage = daysInCurrentStage(entry);
   const stale =
     !isTerminalStage(entry.currentStage) && daysInStage >= STALE_AFTER_DAYS;
+  const showDue = isDue && !isTerminalStage(entry.currentStage);
 
   return (
     <div
@@ -394,6 +436,14 @@ function CampaignCard({
         >
           {daysInStage}d
         </span>
+        {showDue && (
+          <span
+            className="text-xs font-medium text-red-500 dark:text-red-400"
+            title="Due for contact on the Today view"
+          >
+            ● due
+          </span>
+        )}
       </div>
       {showRemove && (
         <button

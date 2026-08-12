@@ -36,6 +36,12 @@ export function PersonForm({ initial, onDone }: Props) {
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [saving, setSaving] = useState(false);
 
+  // The origin-story toll gate (DECISIONS.md 2026-08-12): dormant is the only
+  // tier allowed to hold an unwritten origin story — bulk imports land there.
+  // Promotion to any other tier requires writing the story first, in the
+  // user's own words; it is never fabricated.
+  const storyRequired = tier !== "dormant";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -137,18 +143,21 @@ export function PersonForm({ initial, onDone }: Props) {
 
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
-          Origin story <span className="text-red-500">*</span>
+          Origin story{" "}
+          {storyRequired && <span className="text-red-500">*</span>}
         </label>
         <textarea
           value={originStory}
           onChange={(e) => setOriginStory(e.target.value)}
           placeholder="How did you meet? What made this relationship matter?"
           rows={2}
-          required
+          required={storyRequired}
           className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-500"
         />
         <p className="mt-1 text-xs text-slate-400">
-          Encrypted. Only you see this.
+          {storyRequired
+            ? "Encrypted. Only you see this."
+            : "Optional while dormant — required to promote to any other tier. Encrypted."}
         </p>
       </div>
 
@@ -191,7 +200,9 @@ export function PersonForm({ initial, onDone }: Props) {
 
       <button
         type="submit"
-        disabled={saving || !name.trim() || !originStory.trim()}
+        disabled={
+          saving || !name.trim() || (storyRequired && !originStory.trim())
+        }
         className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
       >
         {saving ? "Saving…" : initial ? "Save changes" : "Add person"}

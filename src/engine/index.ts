@@ -4,6 +4,7 @@ export {
   getDueList,
   isSnoozeActive,
   snoozeExpiresAt,
+  daysUntilNextDue,
 } from "./due";
 export {
   advanceCampaignStage,
