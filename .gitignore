@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Compiled binary for tools/screen-ocr (rebuilt on demand from ocr.swift)
+tools/screen-ocr/.build/
+
 # Secrets and environment
 .env
 .env.*

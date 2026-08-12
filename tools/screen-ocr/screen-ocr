@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# screen-ocr — compile ocr.swift once, then run it.
+#
+# Swift script mode recompiles on every run (several seconds). This caches a
+# binary next to the source and rebuilds only when the source is newer.
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="$DIR/ocr.swift"
+BIN="$DIR/.build/screen-ocr"
+
+if [[ ! -x "$BIN" || "$SRC" -nt "$BIN" ]]; then
+  mkdir -p "$DIR/.build"
+  echo "compiling…" >&2
+  swiftc -O -o "$BIN" "$SRC"
+fi
+
+exec "$BIN" "$@"

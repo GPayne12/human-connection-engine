@@ -5,6 +5,7 @@ import { PeopleList } from "./components/people/PeopleList";
 import { PersonPage } from "./components/people/PersonPage";
 import { CampaignBoard } from "./components/campaigns/CampaignBoard";
 import { DataPage } from "./components/data/DataPage";
+import { TriageView } from "./components/triage/TriageView";
 import { AppProvider } from "./context/AppContext";
 import { useAppData } from "./hooks/useAppData";
 
@@ -17,6 +18,7 @@ const router = createBrowserRouter([
       { path: "people", element: <PeopleList /> },
       { path: "people/:id", element: <PersonPage /> },
       { path: "campaigns", element: <CampaignBoard /> },
+      { path: "triage", element: <TriageView /> },
       { path: "data", element: <DataPage /> },
     ],
   },
