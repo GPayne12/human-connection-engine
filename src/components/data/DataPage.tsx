@@ -7,6 +7,9 @@ import {
   serializeExport,
   type ExportFile,
 } from "../../db/export";
+import { parseLinkedInCsv, planLinkedInImport } from "../../db/linkedin";
+import { bulkImportPeople } from "../../db";
+import type { Tier } from "../../types";
 
 function downloadFile(contents: string, filename: string): void {
   const blob = new Blob([contents], { type: "application/json" });
@@ -23,10 +26,13 @@ function summarize(file: ExportFile): string {
 }
 
 export function DataPage() {
-  const { refresh } = useApp();
+  const { people, refresh } = useApp();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const linkedInInputRef = useRef<HTMLInputElement>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importingLinkedIn, setImportingLinkedIn] = useState(false);
+  const [linkedInTier, setLinkedInTier] = useState<Tier>("dormant");
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,6 +67,40 @@ export function DataPage() {
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleLinkedInFile(inputFile: File) {
+    setImportingLinkedIn(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const raw = await inputFile.text();
+      const connections = parseLinkedInCsv(raw);
+      const plan = planLinkedInImport(
+        connections,
+        linkedInTier,
+        people.map((p) => p.name),
+      );
+      await bulkImportPeople(plan.people);
+      await refresh();
+      const parts = [
+        `Imported ${plan.people.length} connection${plan.people.length === 1 ? "" : "s"} as ${linkedInTier}`,
+      ];
+      if (plan.skippedExisting.length > 0)
+        parts.push(
+          `skipped ${plan.skippedExisting.length} already in the graph`,
+        );
+      if (plan.ignoredEmptyRows > 0)
+        parts.push(
+          `ignored ${plan.ignoredEmptyRows} blank row${plan.ignoredEmptyRows === 1 ? "" : "s"}`,
+        );
+      setMessage(`${parts.join(", ")}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "LinkedIn import failed.");
+    } finally {
+      setImportingLinkedIn(false);
+      if (linkedInInputRef.current) linkedInInputRef.current.value = "";
     }
   }
 
@@ -116,6 +156,44 @@ export function DataPage() {
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) void handleImportFile(file);
+          }}
+          className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 disabled:opacity-50 dark:text-slate-400 dark:file:bg-slate-100 dark:file:text-slate-900"
+        />
+      </section>
+
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
+        <h2 className="mb-1 text-sm font-semibold text-slate-900 dark:text-slate-100">
+          Import LinkedIn connections
+        </h2>
+        <p className="mb-3 text-sm text-slate-500 dark:text-slate-400">
+          Takes the Connections.csv from LinkedIn's official data export
+          (Settings → Data privacy → Get a copy of your data). Names already in
+          the graph are skipped, never overwritten. Origin stories stay empty —
+          those are yours to write as people enter campaigns.
+        </p>
+        <div className="mb-3 flex items-center gap-2">
+          <label className="text-sm text-slate-600 dark:text-slate-400">
+            Import everyone as
+          </label>
+          <select
+            value={linkedInTier}
+            onChange={(e) => setLinkedInTier(e.target.value as Tier)}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
+          >
+            <option value="dormant">Dormant (recommended for bulk)</option>
+            <option value="extended">Extended</option>
+            <option value="active">Active</option>
+            <option value="inner">Inner circle</option>
+          </select>
+        </div>
+        <input
+          ref={linkedInInputRef}
+          type="file"
+          accept=".csv,text/csv"
+          disabled={importingLinkedIn}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void handleLinkedInFile(file);
           }}
           className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-slate-700 disabled:opacity-50 dark:text-slate-400 dark:file:bg-slate-100 dark:file:text-slate-900"
         />

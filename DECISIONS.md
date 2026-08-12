@@ -65,3 +65,31 @@ Running log of significant choices, thesis-based reasoning, and trade-offs.
 **Trade-off:** The trust boundary changes from "only this browser can ever read this" to "only this service on this machine can." Anyone who can reach the service (this machine's local user, or anyone who can open an SSH tunnel to it) can read plaintext notes for the duration of a request. Accepted: the service still never persists plaintext to disk, and the alternative traded this for a UX regression the app was explicitly designed to avoid. Revisit if the tailnet ever needs to include an untrusted device.
 
 **Also decided:** Law 1's ESLint rule (`no fetch outside src/api/`) needed no amendment. The new HTTP calls live in `src/api/graph.ts`, which was already the sanctioned location — `src/db/index.ts` calls into it rather than calling `fetch` itself. Law 1's actual substance ("no agent may trigger outreach") was never about local-service plumbing, just about where network calls are allowed to originate from in the source tree.
+
+---
+
+## 2026-08-12 — Audience of One; Usage Gates Building
+
+**Decision:** HCE has no future as a product. It is a personal instrument for one user, pumped with his own data, and is designed accordingly: opinionated defaults, no multi-tenancy, no onboarding, no generality tax. Its immediate purpose is settled — **bridge to the next job.** The "New W2" campaign (learning design / AI enablement, $75–200k) is the fall campaign; securing a new W2 or consistent contract work is the breakpoint the tool exists to break.
+
+Feature development follows an **adaptive-release rule: usage gates building.** Each increment unlocks only after a usage milestone — per-campaign cadence and the Layer 4 brief unlock when ~15 people are placed in campaign rosters; draft assist unlocks when the brief is in real use; context refresh and Layer 6 unlock at ~25 logged interactions. The LinkedIn importer is the one exemption, because it is what makes population feasible at all.
+
+**Reasoning:** The 2026-08-04 leadership analysis's warning applies directly: no amount of tool work fixes the people gap, and building HCE features _is_ tool work. The gate inverts the temptation permanently — the only way to unlock the next feature is to do the human outreach the tool exists to serve. The gate applies to the builder; it is not an in-app mechanic. Law 2's ban on streaks, badges, and engagement bait inside the app is untouched and permanent. The app's daily pull must come from being genuinely useful — who's due, who's stalled, what the brief says — not from manufactured compulsion.
+
+**Trade-off:** Slower feature velocity, deliberately. A feature idea that arrives mid-gate waits, however good it is. Accepted: the alternative is an elegant procrastination engine for the exact avoidance the tool was built to end.
+
+---
+
+## 2026-08-12 — Layer 4 Scope: Prepare-Only AI, Serving the New W2 Bridge
+
+**Decision:** Layer 4 is a set of one-click **prepare** actions on people and campaign cards — never an agent, never a feed, never a background job. Mechanism: gather specific graph fields → one call through `src/ai/provider.ts` → text returned to the UI → the human edits, uses, or discards it. Three capabilities, in build order:
+
+1. **Pre-contact brief** — where we left off, what I owe them, stage-aware (a brief for someone in `warmup` orients toward what a clean `ask` requires: referral or informational call, never an application).
+2. **Draft assist on stage moves** — dragging a card to a new stage offers a draft opener in the user's register; drafts are throwaway and nothing persists unless acted on.
+3. **Context refresh** — on-click only: what changed around this person since last contact (company news, role changes), via model-side web search.
+
+The Quantic MSAIE concentration project (due 2026-09-13) is a **separate track** — Layer 4 is not scoped as coursework and carries no deadline other than the fall hiring cycle itself.
+
+**Reasoning:** Every message is currently drafted from scratch — the biggest named friction in campaign mode — and pre-contact preparation is where an AI layer serves the "two minutes before a coffee" use case without touching the human-terminal rule. Law 1 stands untouched: the app has no send button and never will; the lint rule keeps all network calls in `src/api/`. Law 5's disclosure ("what was sent to the model") appears on every call.
+
+**Trade-off:** Context refresh is the only capability where graph data (a contact's name/company) leaves the machine, to a third-party model with web search. Bounded: it fires only on an explicit click, never on a schedule, and the disclosure shows the exact query. Accepted — the value of fresh context for a warmup message that lands as genuine attention outweighs a per-click, disclosed, user-initiated lookup. Revisit if a local-model option becomes practical.
