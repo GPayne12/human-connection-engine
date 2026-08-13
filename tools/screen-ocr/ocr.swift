@@ -1,8 +1,8 @@
 // ocr.swift — turn a screen recording (or screenshots) of a LinkedIn
 // connections list into a CSV the HCE triage view can read.
 //
-// Uses only Apple frameworks: AVFoundation samples frames out of the video,
-// Vision does the text recognition. No ffmpeg, no Python, no installs.
+// Uses only Apple frameworks: AVFoundation decodes the video, Vision does the
+// text recognition. No ffmpeg, no Python, no installs.
 //
 // Output is deliberately in LinkedIn's OWN export column format, so the
 // existing, tested importer (src/db/linkedin.ts) parses it with no new code
@@ -15,6 +15,7 @@
 import Foundation
 import Vision
 import AVFoundation
+import CoreImage
 import CoreGraphics
 import ImageIO
 
@@ -25,6 +26,10 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
+func log(_ message: String) {
+    FileHandle.standardError.write(Data("\(message)\n".utf8))
+}
+
 let args = Array(CommandLine.arguments.dropFirst())
 guard !args.isEmpty else {
     print("""
@@ -33,6 +38,12 @@ guard !args.isEmpty else {
       -o, --output <file.csv>   where to write (default: ./connections-ocr.csv)
           --fps <n>             frames sampled per second of video (default: 2)
           --raw <file.txt>      also dump the raw OCR lines, for debugging
+          --min-sightings <n>   drop anyone seen in fewer than n frames (default: 1).
+                                2 clears most motion-blur debris, at the cost of
+                                a few real people caught in only one frame.
+
+    A .txt raw dump can be passed back in as the input, which re-parses it
+    without re-reading the video.
     """)
     exit(0)
 }
@@ -41,117 +52,54 @@ var inputPath: String?
 var outputPath = "connections-ocr.csv"
 var fps = 2.0
 var rawPath: String?
+// Defaults to keeping everything. Raising this removes debris but also drops
+// real people who happened to be caught in a single frame, and a junk row
+// costs one swipe whereas a missing person cannot be swiped back in.
+var minSightings = 1
 
-var i = 0
-while i < args.count {
-    switch args[i] {
+var argIndex = 0
+while argIndex < args.count {
+    switch args[argIndex] {
     case "-o", "--output":
-        i += 1
-        guard i < args.count else { fail("--output needs a path") }
-        outputPath = args[i]
+        argIndex += 1
+        guard argIndex < args.count else { fail("--output needs a path") }
+        outputPath = args[argIndex]
     case "--fps":
-        i += 1
-        guard i < args.count, let v = Double(args[i]), v > 0 else {
+        argIndex += 1
+        guard argIndex < args.count, let v = Double(args[argIndex]), v > 0 else {
             fail("--fps needs a positive number")
         }
         fps = v
     case "--raw":
-        i += 1
-        guard i < args.count else { fail("--raw needs a path") }
-        rawPath = args[i]
+        argIndex += 1
+        guard argIndex < args.count else { fail("--raw needs a path") }
+        rawPath = args[argIndex]
+    case "--min-sightings":
+        argIndex += 1
+        guard argIndex < args.count, let v = Int(args[argIndex]), v >= 1 else {
+            fail("--min-sightings needs a whole number of 1 or more")
+        }
+        minSightings = v
     default:
-        if inputPath == nil { inputPath = args[i] } else { fail("unexpected argument: \(args[i])") }
+        if inputPath == nil { inputPath = args[argIndex] } else {
+            fail("unexpected argument: \(args[argIndex])")
+        }
     }
-    i += 1
+    argIndex += 1
 }
 
 guard let inputPath else { fail("no input file given") }
 let inputURL = URL(fileURLWithPath: (inputPath as NSString).expandingTildeInPath)
 
-// ── Gather frames ────────────────────────────────────────────────────────
-
-let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "tiff", "gif"]
-
-func loadImage(_ url: URL) -> CGImage? {
-    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-    return CGImageSourceCreateImageAtIndex(source, 0, nil)
-}
-
-/// Runs an async call from this synchronous script. Safe here because none of
-/// the AVFoundation work below is main-actor bound.
-func syncAwait<T>(_ operation: @escaping () async throws -> T) throws -> T {
-    let semaphore = DispatchSemaphore(value: 0)
-    var outcome: Result<T, Error>?
-    Task.detached {
-        do { outcome = .success(try await operation()) }
-        catch { outcome = .failure(error) }
-        semaphore.signal()
-    }
-    semaphore.wait()
-    return try outcome!.get()
-}
-
-func framesFromVideo(_ url: URL, fps: Double) -> [CGImage] {
-    let asset = AVURLAsset(url: url)
-    let generator = AVAssetImageGenerator(asset: asset)
-    generator.appliesPreferredTrackTransform = true
-    // Zero tolerance: we want the frame at the moment asked for, because
-    // consecutive samples that collapse onto the same frame waste OCR time.
-    generator.requestedTimeToleranceBefore = .zero
-    generator.requestedTimeToleranceAfter = .zero
-
-    guard let duration = try? syncAwait({ try await asset.load(.duration) }) else {
-        fail("could not read \(url.lastPathComponent) — is it a video?")
-    }
-    let seconds = CMTimeGetSeconds(duration)
-    guard seconds.isFinite, seconds > 0 else {
-        fail("could not read a duration from \(url.lastPathComponent) — is it a video?")
-    }
-
-    var images: [CGImage] = []
-    let step = 1.0 / fps
-    var t = 0.0
-    while t < seconds {
-        let time = CMTime(seconds: t, preferredTimescale: 600)
-        if let image = try? syncAwait({ try await generator.image(at: time).image }) {
-            images.append(image)
-        }
-        t += step
-    }
-    return images
-}
-
-var frames: [CGImage] = []
-var isDirectory: ObjCBool = false
-FileManager.default.fileExists(atPath: inputURL.path, isDirectory: &isDirectory)
-
-if isDirectory.boolValue {
-    let contents = (try? FileManager.default.contentsOfDirectory(at: inputURL, includingPropertiesForKeys: nil)) ?? []
-    let imageFiles = contents
-        .filter { imageExtensions.contains($0.pathExtension.lowercased()) }
-        .sorted { $0.lastPathComponent < $1.lastPathComponent }
-    guard !imageFiles.isEmpty else { fail("no images found in \(inputURL.path)") }
-    frames = imageFiles.compactMap(loadImage)
-} else if imageExtensions.contains(inputURL.pathExtension.lowercased()) {
-    guard let image = loadImage(inputURL) else { fail("could not read \(inputURL.path)") }
-    frames = [image]
-} else {
-    frames = framesFromVideo(inputURL, fps: fps)
-}
-
-guard !frames.isEmpty else { fail("no frames to read") }
-FileHandle.standardError.write(Data("reading \(frames.count) frame(s)…\n".utf8))
-
-// ── OCR ──────────────────────────────────────────────────────────────────
+// ── Text recognition ─────────────────────────────────────────────────────
 
 /// Recognized text for one frame, ordered the way a person reads it.
-func recognizeLines(in image: CGImage) -> [String] {
+func recognizeLines(_ handler: VNImageRequestHandler) -> [String] {
     let request = VNRecognizeTextRequest()
     request.recognitionLevel = .accurate
     // Language correction "fixes" surnames into dictionary words. Off.
     request.usesLanguageCorrection = false
 
-    let handler = VNImageRequestHandler(cgImage: image, options: [:])
     guard (try? handler.perform([request])) != nil,
           let observations = request.results else { return [] }
 
@@ -168,60 +116,95 @@ func recognizeLines(in image: CGImage) -> [String] {
         .compactMap { $0.topCandidates(1).first?.string }
 }
 
-// ── Parse ────────────────────────────────────────────────────────────────
+// ── Parsing ──────────────────────────────────────────────────────────────
 
 // LinkedIn renders each connection as roughly:
 //     <name>
-//     <headline>            (can wrap onto more than one line)
+//     Message                (the button — it sits BETWEEN name and headline)
+//     <headline>             (can wrap onto more than one line)
 //     Connected on <date>
-//     Message
-// "Connected on" anchors the end of an entry and "Message" ends the row, so
-// the two together bracket exactly one person. Parsing happens per frame,
-// never across frames: a scroll cuts entries in half at the frame edge, and
-// carrying a half-entry into the next frame glues one person's headline onto
-// the next person's name.
+// "Connected on" is the only reliable delimiter, so it alone brackets an
+// entry. The button is stripped as noise rather than treated as a boundary:
+// treating it as one discards the name, which is the line above it.
+//
+// Parsing happens per frame, never across frames: a scroll cuts entries in
+// half at the frame edge, and carrying a half-entry into the next frame glues
+// one person's headline onto the next person's name.
 
 let connectedOn = try! NSRegularExpression(pattern: "^connected on\\b", options: .caseInsensitive)
 let degreeBadge = try! NSRegularExpression(pattern: "^[•·]?\\s*\\d(st|nd|rd|th)\\b", options: .caseInsensitive)
+// Vision often merges the button into a neighbouring line ("..• Message ) Head
+// of Design"), so the token has to be removed from inside a line, not just
+// matched against a whole one.
+let buttonTokens = try! NSRegularExpression(
+    pattern: "\\b(message|connect|following|pending)\\b", options: .caseInsensitive)
 
 let chrome: Set<String> = [
-    "message", "connect", "following", "follow", "more", "pending",
-    "my network", "connections", "search", "sort by:", "recently added",
+    "my network", "connections", "search", "sort by:", "recently added", "follow",
 ]
-let rowEnd: Set<String> = ["message", "connect", "following", "pending"]
+let decoration = CharacterSet(charactersIn: " .,•·()[]{}'\"|-–—…‧∙")
+
+/// Words that are common in job headlines and essentially never surnames.
+/// Deliberately excludes occupational surnames — Baker, Taylor, Miller,
+/// Marshall, Carpenter, Fisher, Hunter, Walker, Cook and friends are real
+/// people in this list.
+let occupational: Set<String> = [
+    "manager", "director", "professor", "assistant", "analyst", "engineer",
+    "consultant", "founder", "specialist", "coordinator", "officer", "president",
+    "designer", "developer", "advocate", "educator", "trainer", "administrator",
+    "architect", "enablement", "strategist", "executive", "supervisor",
+    "recruiter", "therapist", "instructor", "researcher", "scientist",
+    "technician", "associate", "intern", "freelance", "student", "graduate",
+    "candidate", "professional", "enthusiast", "advisor", "counselor",
+    "producer", "attorney", "nurse", "physician", "pharmacist", "accountant",
+    "auditor", "ambassador", "representative", "realtor", "entrepreneur",
+    "marketing", "sales", "operations", "logistics", "finance", "recruiting",
+    "seeking", "experienced", "aspiring", "certified", "licensed", "senior",
+    "junior", "ceo", "cto", "coo", "cfo", "vp", "mba", "phd",
+]
 
 func isAnchor(_ line: String) -> Bool {
     let range = NSRange(line.startIndex..., in: line)
     return connectedOn.firstMatch(in: line, range: range) != nil
 }
 
-func isRowEnd(_ line: String) -> Bool {
-    rowEnd.contains(line.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+/// Strips the button text and the surrounding punctuation Vision picks up from
+/// the UI, leaving the human-written part of the line.
+func clean(_ raw: String) -> String {
+    let range = NSRange(raw.startIndex..., in: raw)
+    let stripped = buttonTokens.stringByReplacingMatches(
+        in: raw, range: range, withTemplate: " ")
+    return stripped
+        .trimmingCharacters(in: decoration)
+        .split(separator: " ")
+        .joined(separator: " ")
 }
 
 func isNoise(_ line: String) -> Bool {
-    let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.isEmpty { return true }
-    if chrome.contains(trimmed.lowercased()) { return true }
-    let range = NSRange(trimmed.startIndex..., in: trimmed)
-    if degreeBadge.firstMatch(in: trimmed, range: range) != nil { return true }
+    if line.isEmpty { return true }
+    if chrome.contains(line.lowercased()) { return true }
+    let range = NSRange(line.startIndex..., in: line)
+    if degreeBadge.firstMatch(in: line, range: range) != nil { return true }
     // Bare punctuation or single characters are always list chrome.
-    if trimmed.count <= 2 { return true }
+    if line.count <= 2 { return true }
     return false
 }
 
 /// Rejects the debris a scrolling capture produces: half-rendered text at the
-/// frame edge, motion-blurred rows, and stray UI copy. A real name is a couple
-/// of capitalised words with no digits and no comma.
+/// frame edge, and — the common one — a headline promoted into the name slot
+/// because the name above it had already scrolled out of shot.
 func isPlausibleName(_ raw: String) -> Bool {
     let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard name.count >= 3, name.count <= 60 else { return false }
     guard name.rangeOfCharacter(from: .decimalDigits) == nil else { return false }
-    guard !name.contains(","), !name.contains(":"), !name.contains("@") else { return false }
+    for bad in ["/", "@", ":", "|", "&", ". "] where name.contains(bad) { return false }
+    if name.hasSuffix(".") { return false }
     let words = name.split(separator: " ")
     guard words.count >= 2, words.count <= 5 else { return false }
+    // Case is not a signal: plenty of people write their own name lower-case.
     for word in words {
-        guard let first = word.first, first.isUppercase else { return false }
+        let bare = word.lowercased().trimmingCharacters(in: decoration)
+        if occupational.contains(bare) { return false }
     }
     return true
 }
@@ -239,37 +222,158 @@ func parseEntries(from lines: [String]) -> [Candidate] {
         if isAnchor(line) {
             // Cap at four lines: a name plus a headline that wrapped. Anything
             // longer means debris crept in, and the tail is the real entry.
-            let parts = Array(pending.filter { !isNoise($0) }.suffix(4))
+            let parts = Array(pending.suffix(4))
             if let name = parts.first, isPlausibleName(name) {
                 found.append(Candidate(
-                    name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                    title: parts.dropFirst().joined(separator: " ")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)))
+                    name: name,
+                    title: parts.dropFirst().joined(separator: " ")))
             }
             pending = []
-        } else if isRowEnd(line) {
-            pending = []
         } else {
-            pending.append(line)
+            let cleaned = clean(line)
+            if !isNoise(cleaned) { pending.append(cleaned) }
         }
     }
     return found
 }
 
+// ── Frame streaming ──────────────────────────────────────────────────────
+
+/// Runs an async call from this synchronous script. Safe here because none of
+/// the AVFoundation work below is main-actor bound.
+func syncAwait<T>(_ operation: @escaping () async throws -> T) throws -> T {
+    let semaphore = DispatchSemaphore(value: 0)
+    var outcome: Result<T, Error>?
+    Task.detached {
+        do { outcome = .success(try await operation()) }
+        catch { outcome = .failure(error) }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    return try outcome!.get()
+}
+
 var observations: [Candidate] = []
 var rawLines: [String] = []
+var framesRead = 0
 
-for (index, frame) in frames.enumerated() {
-    let lines = recognizeLines(in: frame)
-    if rawPath != nil {
-        rawLines.append("--- frame \(index + 1) ---")
+// Frames are delimited in the raw dump so a dump can be fed straight back in,
+// which makes tuning the parser a second's work instead of a full re-read of
+// the video.
+let frameMarkerPrefix = "--- frame"
+
+/// OCRs one frame and folds its entries into the running totals. Frames are
+/// handled as they arrive and then released — a ten-minute recording holds
+/// well over a thousand samples, which is gigabytes if they are all kept.
+func processLines(_ lines: [String], estimate: Int, echoRaw: Bool = true) {
+    framesRead += 1
+    if rawPath != nil && echoRaw {
+        rawLines.append(frameMarkerPrefix + " \(framesRead) ---")
         rawLines.append(contentsOf: lines)
     }
     observations.append(contentsOf: parseEntries(from: lines))
-    if (index + 1) % 10 == 0 {
-        FileHandle.standardError.write(Data("  \(index + 1)/\(frames.count)\n".utf8))
+    if framesRead % 25 == 0 {
+        let suffix = estimate > 0 ? "/\(estimate)" : ""
+        log("  frame \(framesRead)\(suffix) — \(observations.count) entries so far")
     }
 }
+
+func handleFrame(_ handler: VNImageRequestHandler, estimate: Int) {
+    processLines(recognizeLines(handler), estimate: estimate)
+}
+
+let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "heic", "tiff", "gif"]
+
+func loadImage(_ url: URL) -> CGImage? {
+    guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
+    return CGImageSourceCreateImageAtIndex(source, 0, nil)
+}
+
+/// Decodes the video once, front to back, taking a frame every `1/fps`
+/// seconds. Seeking to each sample instead would force a decode from the
+/// nearest keyframe every time — minutes of work on a long recording.
+func streamVideo(_ url: URL, fps: Double) {
+    let asset = AVURLAsset(url: url)
+
+    guard let track = (try? syncAwait({
+        try await asset.loadTracks(withMediaType: .video)
+    }))?.first else {
+        fail("no video track in \(url.lastPathComponent)")
+    }
+    let duration = (try? syncAwait({ try await asset.load(.duration) })) ?? .zero
+    let seconds = CMTimeGetSeconds(duration)
+    let estimate = seconds.isFinite && seconds > 0 ? Int(seconds * fps) : 0
+    if estimate > 0 {
+        log("reading ~\(estimate) frames from \(Int(seconds))s of video…")
+    }
+
+    guard let reader = try? AVAssetReader(asset: asset) else {
+        fail("could not open \(url.lastPathComponent)")
+    }
+    let output = AVAssetReaderTrackOutput(track: track, outputSettings: [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+    ])
+    output.alwaysCopiesSampleData = false
+    reader.add(output)
+    reader.startReading()
+
+    let step = 1.0 / fps
+    var nextSampleAt = 0.0
+
+    while let sample = output.copyNextSampleBuffer() {
+        let t = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample))
+        if t + 1e-6 >= nextSampleAt, let pixels = CMSampleBufferGetImageBuffer(sample) {
+            // Vision reads the pixel buffer directly — no CGImage conversion.
+            handleFrame(VNImageRequestHandler(cvPixelBuffer: pixels, options: [:]),
+                        estimate: estimate)
+            nextSampleAt += step
+        }
+    }
+
+    if reader.status == .failed {
+        fail("decoding stopped: \(reader.error?.localizedDescription ?? "unknown")")
+    }
+}
+
+var isDirectory: ObjCBool = false
+FileManager.default.fileExists(atPath: inputURL.path, isDirectory: &isDirectory)
+
+if isDirectory.boolValue {
+    let contents = (try? FileManager.default.contentsOfDirectory(at: inputURL, includingPropertiesForKeys: nil)) ?? []
+    let imageFiles = contents
+        .filter { imageExtensions.contains($0.pathExtension.lowercased()) }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    guard !imageFiles.isEmpty else { fail("no images found in \(inputURL.path)") }
+    log("reading \(imageFiles.count) image(s)…")
+    for file in imageFiles {
+        guard let image = loadImage(file) else { continue }
+        handleFrame(VNImageRequestHandler(cgImage: image, options: [:]), estimate: imageFiles.count)
+    }
+} else if inputURL.pathExtension.lowercased() == "txt" {
+    // Re-parse a previous --raw dump. No OCR, so parser changes can be tried
+    // against a real recording without re-reading it.
+    guard let text = try? String(contentsOf: inputURL, encoding: .utf8) else {
+        fail("could not read \(inputURL.path)")
+    }
+    var blocks: [[String]] = []
+    for line in text.components(separatedBy: "\n") {
+        if line.hasPrefix(frameMarkerPrefix) { blocks.append([]) }
+        else if !blocks.isEmpty { blocks[blocks.count - 1].append(line) }
+    }
+    guard !blocks.isEmpty else {
+        fail("\(inputURL.lastPathComponent) has no \"\(frameMarkerPrefix) N ---\" markers — is it a --raw dump?")
+    }
+    log("re-parsing \(blocks.count) frame(s) from a raw dump…")
+    for block in blocks { processLines(block, estimate: blocks.count, echoRaw: false) }
+} else if imageExtensions.contains(inputURL.pathExtension.lowercased()) {
+    guard let image = loadImage(inputURL) else { fail("could not read \(inputURL.path)") }
+    log("reading 1 image…")
+    handleFrame(VNImageRequestHandler(cgImage: image, options: [:]), estimate: 1)
+} else {
+    streamVideo(inputURL, fps: fps)
+}
+
+guard framesRead > 0 else { fail("no frames could be read from \(inputURL.path)") }
 
 if let rawPath {
     try? rawLines.joined(separator: "\n").write(
@@ -277,13 +381,12 @@ if let rawPath {
 }
 
 if observations.isEmpty {
-    FileHandle.standardError.write(Data("""
+    log("""
 
     No entries could be paired up. Re-run with --raw /tmp/ocr.txt to see what
     the OCR actually read, and check the recording covers the connections list
     itself — each row needs its "Connected on <date>" line visible.
-
-    """.utf8))
+    """)
 }
 
 // ── Reconcile ────────────────────────────────────────────────────────────
@@ -298,10 +401,11 @@ func normalize(_ s: String) -> String {
 func withinEditDistance(_ a: String, _ b: String, limit: Int) -> Bool {
     if abs(a.count - b.count) > limit { return false }
     let x = Array(a), y = Array(b)
+    if x.isEmpty || y.isEmpty { return max(x.count, y.count) <= limit }
     var previous = Array(0...y.count)
-    for i in 1...max(x.count, 1) where !x.isEmpty {
+    for i in 1...x.count {
         var current = [i] + Array(repeating: 0, count: y.count)
-        for j in 1...max(y.count, 1) where !y.isEmpty {
+        for j in 1...y.count {
             current[j] = x[i - 1] == y[j - 1]
                 ? previous[j - 1]
                 : min(previous[j - 1], previous[j], current[j - 1]) + 1
@@ -321,9 +425,6 @@ func mostCommon(_ values: [String]) -> String {
     }?.key ?? ""
 }
 
-// A scroll shows each person in many frames, so the same entry is observed
-// repeatedly with occasional OCR slips. Group the observations and let the
-// majority reading win, rather than trusting any single frame.
 // `key` is only ever used for matching. Observed spellings stay in `names`,
 // so the vote below is between things the OCR actually read, never against a
 // lower-cased key that would win ties and destroy the capitalisation.
@@ -354,7 +455,12 @@ for observation in observations {
     if !observation.title.isEmpty { groups[index].titles.append(observation.title) }
 }
 
+// A real person stays on screen for seconds and so lands in many frames. The
+// debris a scroll produces — smeared text from a frame caught mid-motion —
+// reads differently every time, so it turns up once and never again. Sighting
+// count separates the two more reliably than any spelling heuristic.
 var resolved: [Candidate] = groups.compactMap { group in
+    guard group.names.count >= minSightings else { return nil }
     let name = mostCommon(group.names.filter { !$0.isEmpty })
     guard !name.isEmpty else { return nil }
     return Candidate(name: name, title: mostCommon(group.titles))
@@ -393,5 +499,5 @@ for candidate in resolved {
 let outURL = URL(fileURLWithPath: (outputPath as NSString).expandingTildeInPath)
 try rows.joined(separator: "\n").appending("\n").write(to: outURL, atomically: true, encoding: .utf8)
 
-print("\(resolved.count) people → \(outURL.path)")
+print("\(resolved.count) people from \(framesRead) frames → \(outURL.path)")
 print("review the CSV before importing — OCR guesses, and the triage swipe is the filter")
