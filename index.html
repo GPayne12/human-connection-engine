@@ -3,8 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>human-connection-engine</title>
+    <!-- Chrome reads this to offer "Install app"; on iOS the apple-* meta
+         tags below do the equivalent job for Add to Home Screen. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- viewport-fit=cover lets the bottom tab bar paint into the home-indicator
+         area; the bar adds its own env(safe-area-inset-bottom) padding back. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-title" content="HCE" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#0f172a"
+      media="(prefers-color-scheme: dark)"
+    />
+    <title>Human Connection Engine</title>
   </head>
   <body>
     <div id="root"></div>

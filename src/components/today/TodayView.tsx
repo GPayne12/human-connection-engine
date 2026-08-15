@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { snoozePerson } from "../../db";
 import { useApp } from "../../context/AppContext";
-import { daysUntilNextDue, isTerminalStage } from "../../engine";
-import { HealthBar } from "../ui/HealthBar";
+import { daysUntilNextDue, isTerminalStage, nearlyReady } from "../../engine";
+import { HealthDots } from "../ui/HealthDots";
 import { TierBadge } from "../ui/Badge";
 import { Modal } from "../ui/Modal";
 import { LogContactForm } from "../forms/LogContactForm";
@@ -73,7 +73,7 @@ function DueCard({
           <TierBadge tier={item.person.tier} />
         </div>
 
-        <HealthBar score={item.healthScore} />
+        <HealthDots score={item.healthScore} />
 
         <div className="mt-3 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           <span className="font-medium text-red-500 dark:text-red-400">
@@ -128,24 +128,24 @@ function DueCard({
         <div className="mt-3 flex gap-2">
           <button
             onClick={() => setLogging(true)}
-            className="flex-1 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+            className="min-h-11 flex-1 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700"
           >
             Log contact
           </button>
           <div className="relative">
             <button
               onClick={() => setSnoozing((v) => !v)}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
+              className="min-h-11 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
             >
               Snooze
             </button>
             {snoozing && (
-              <div className="absolute right-0 top-10 z-10 w-40 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+              <div className="absolute right-0 top-12 z-10 w-40 rounded-xl border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-800">
                 {SNOOZE_OPTIONS.map((opt) => (
                   <button
                     key={opt.days}
                     onClick={() => handleSnooze(opt.days)}
-                    className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
+                    className="min-h-11 w-full px-4 text-left text-sm text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-700"
                   >
                     {opt.label}
                   </button>
@@ -187,8 +187,8 @@ export function TodayView() {
 
   return (
     <div className="mx-auto max-w-xl px-4 py-6">
-      <div className="mb-6 flex items-center justify-between">
-        <div>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
             Today
           </h1>
@@ -200,9 +200,10 @@ export function TodayView() {
         </div>
         <Link
           to="/people/new"
-          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
+          className="flex min-h-11 shrink-0 items-center rounded-lg bg-slate-900 px-3 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-slate-200"
         >
-          + Add person
+          <span className="sm:hidden">+ Add</span>
+          <span className="hidden sm:inline">+ Add person</span>
         </Link>
       </div>
 
@@ -256,7 +257,7 @@ function EmptyState() {
       .filter((e) => !isTerminalStage(e.currentStage))
       .map((e) => e.personId),
   ).size;
-  const unwrittenStories = people.filter((p) => !p.originStory.trim()).length;
+  const unfinished = nearlyReady(people).length;
   const nextDue = daysUntilNextDue(
     people,
     interactionsByPersonId,
@@ -298,11 +299,16 @@ function EmptyState() {
             through campaigns.
           </p>
         )}
-        {unwrittenStories > 0 && (
+        {unfinished > 0 && (
           <p>
-            {unwrittenStories}{" "}
-            {unwrittenStories === 1 ? "contact is" : "contacts are"} waiting for
-            an origin story.
+            {unfinished} {unfinished === 1 ? "profile is" : "profiles are"}{" "}
+            unfinished — none of them can go on a board yet.{" "}
+            <Link
+              to="/people?ready=no"
+              className="underline hover:text-slate-700 dark:hover:text-slate-300"
+            >
+              Finish one →
+            </Link>
           </p>
         )}
       </div>

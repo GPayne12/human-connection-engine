@@ -302,7 +302,10 @@ export function TriageView() {
               transform: `translate(${dx}px, ${dy}px) rotate(${dx * 0.04}deg)`,
               transition: flyOut || !drag ? "transform 180ms ease-out" : "none",
             }}
-            className="absolute inset-0 flex cursor-grab flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white px-6 text-center shadow-lg active:cursor-grabbing dark:border-slate-700 dark:bg-slate-800"
+            // touch-none is what makes the swipe usable on a phone: without it
+            // the browser claims the gesture first — vertical panning and the
+            // left-edge back-swipe — and the card barely moves.
+            className="absolute inset-0 flex touch-none cursor-grab flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white px-6 text-center shadow-lg active:cursor-grabbing dark:border-slate-700 dark:bg-slate-800"
           >
             <p className="text-2xl font-semibold text-slate-900 dark:text-slate-100">
               {fullName(current)}
@@ -333,26 +336,30 @@ export function TriageView() {
       <div className="mt-6 flex items-center justify-center gap-3">
         <button
           onClick={() => decide("pass")}
-          className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
+          className="min-h-12 flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
         >
           ← Pass
         </button>
         <button
           onClick={() => decide("keep")}
-          className="flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700"
+          className="min-h-12 flex-1 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-700"
         >
           Keep →
         </button>
       </div>
 
       <div className="mt-3 flex items-center justify-between text-xs text-slate-400">
-        <span>Arrow keys work. Drag the card too.</span>
+        <span className="sm:hidden">Swipe the card, or use the buttons.</span>
+        <span className="hidden sm:inline">
+          Arrow keys work. Drag the card too.
+        </span>
         {index > 0 && (
           <button
             onClick={undo}
-            className="hover:text-slate-600 dark:hover:text-slate-300"
+            className="min-h-9 px-1 hover:text-slate-600 dark:hover:text-slate-300"
           >
-            Undo (u)
+            <span className="sm:hidden">Undo</span>
+            <span className="hidden sm:inline">Undo (u)</span>
           </button>
         )}
       </div>

@@ -11,4 +11,35 @@
     @apply font-sans text-base;
     margin: 0;
   }
+
+  /* iOS Safari zooms the whole page when a focused control's text is under
+     16px, and never zooms back out. The design is 14px (text-sm) throughout,
+     which trips it on every single field. Restore 16px only below the `sm`
+     breakpoint, where the zoom would happen — desktop keeps the tighter type. */
+  @media (max-width: 639px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+
+  /* Chrome's pull-to-refresh fires on any downward drag at scroll-top, which
+     collides with the triage swipe and with flicking a campaign column. The
+     page still scrolls; only the overscroll gesture is suppressed. */
+  html,
+  body {
+    overscroll-behavior-y: contain;
+  }
+
+  /* Grey flash on every tap reads as jank on a touch device; the components
+     carry their own :active and hover states. */
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  label {
+    -webkit-tap-highlight-color: transparent;
+  }
 }

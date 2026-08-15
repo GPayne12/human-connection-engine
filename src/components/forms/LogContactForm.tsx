@@ -44,7 +44,7 @@ export function LogContactForm({ person, onDone }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
             Type
@@ -115,7 +115,7 @@ export function LogContactForm({ person, onDone }: Props) {
               key={v}
               type="button"
               onClick={() => setWarmthDelta(v)}
-              className={`flex-1 rounded-lg border py-1.5 text-sm transition-colors ${
+              className={`min-h-11 flex-1 rounded-lg border py-1.5 text-sm transition-colors ${
                 warmthDelta === v
                   ? "border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
                   : "border-slate-200 text-slate-500 hover:border-slate-300 dark:border-slate-600 dark:text-slate-400"
@@ -142,7 +142,7 @@ export function LogContactForm({ person, onDone }: Props) {
         <button
           type="submit"
           disabled={saving || !summary.trim()}
-          className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="min-h-12 flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {saving ? "Saving…" : "Log contact"}
         </button>

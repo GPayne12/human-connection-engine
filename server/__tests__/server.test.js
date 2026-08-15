@@ -19,7 +19,8 @@ let baseUrl;
 test.before(async () => {
   server = app.listen(0, "127.0.0.1");
   await new Promise((resolve) => server.once("listening", resolve));
-  baseUrl = `http://127.0.0.1:${server.address().port}`;
+  // Data routes are mounted under /api; / serves the built UI.
+  baseUrl = `http://127.0.0.1:${server.address().port}/api`;
 });
 
 test.after(async () => {

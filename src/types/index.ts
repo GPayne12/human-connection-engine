@@ -1,4 +1,6 @@
-// Schema version — bump when any entity shape changes and add a migration in src/db/schema.ts
+// Schema version — bump when any entity shape changes. Stamped into every
+// export (src/db/export.ts); migrations belong in the graph service's store
+// (server/src/store.js), not in the client, since Stage 2 moved the data there.
 export const SCHEMA_VERSION = 1;
 
 // ── Tiers ────────────────────────────────────────────────────────────────────
@@ -11,7 +13,6 @@ export type Tier = "inner" | "active" | "extended" | "dormant";
 export interface Person {
   id: string;
   name: string;
-  pronouns?: string;
   role?: string;
   organization?: string;
   tier: Tier;

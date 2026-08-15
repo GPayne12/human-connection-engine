@@ -8,9 +8,43 @@
 // Dates travel as ISO strings; callers are responsible for reviving them
 // (src/db/dates.ts) since this layer only knows about the wire shape.
 
+// Port that `tailscale serve --http=8199` proxies to the graph service. The
+// service itself never leaves 127.0.0.1:5199 — Tailscale is what carries it to
+// the phone and GLap, so the graph is reachable by George's devices and nothing
+// else on the network.
+const TAILNET_GRAPH_PORT = 8199;
+
+// The graph lives on whichever machine served this page. On GDesk that is
+// loopback; opened over the tailnet it is the MagicDNS host in the address bar.
+// Resolving it from window.location instead of a build-time constant means the
+// desktop keeps working with Tailscale down, and the phone needs no separate
+// build. VITE_HCE_SERVER_URL still overrides both.
+// Data routes live under /api; the server serves the built app at /.
+function defaultBaseUrl(): string {
+  if (typeof window === "undefined") return "http://127.0.0.1:5199/api";
+
+  const { protocol, hostname, port } = window.location;
+  const isLoopback =
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1";
+
+  // Vite's dev server on loopback — the graph is a separate process.
+  if (isLoopback) return "http://127.0.0.1:5199/api";
+
+  // Served by the graph server itself over the tailnet: same origin, which
+  // means no CORS preflight on any write.
+  if (port === String(TAILNET_GRAPH_PORT))
+    return `${protocol}//${hostname}:${port}/api`;
+
+  // Served by Vite over the tailnet (development from the phone or GLap).
+  return `${protocol}//${hostname}:${TAILNET_GRAPH_PORT}/api`;
+}
+
 const BASE_URL =
   (import.meta.env.VITE_HCE_SERVER_URL as string | undefined) ??
-  "http://127.0.0.1:5199";
+  defaultBaseUrl();
 
 export class GraphUnreachableError extends Error {
   constructor(cause: unknown) {

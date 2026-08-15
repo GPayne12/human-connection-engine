@@ -7,8 +7,10 @@ import {
   computeReciprocity,
   daysBetween,
   lastContactDate,
+  profileReadiness,
 } from "../../engine";
-import { HealthBar } from "../ui/HealthBar";
+import { HealthDots } from "../ui/HealthDots";
+import { ReadinessPanel } from "../ui/ReadinessMeter";
 import { TierBadge } from "../ui/Badge";
 import { Modal } from "../ui/Modal";
 import { LogContactForm } from "../forms/LogContactForm";
@@ -129,6 +131,7 @@ export function PersonPage() {
   const activeCampaignEntries = campaignEntries.filter(
     (e) => e.personId === person.id,
   );
+  const readiness = profileReadiness(person);
 
   async function handleDelete() {
     await deletePerson(person!.id);
@@ -148,40 +151,54 @@ export function PersonPage() {
         </Link>
 
         {/* Header */}
-        <div className="mb-6 flex items-start justify-between gap-3">
-          <div>
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
             <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
               {person.name}
-              {person.pronouns && (
-                <span className="ml-2 text-base font-normal text-slate-400">
-                  ({person.pronouns})
-                </span>
-              )}
             </h1>
             {(person.role || person.organization) && (
               <p className="text-slate-500 dark:text-slate-400">
                 {[person.role, person.organization].filter(Boolean).join(" · ")}
               </p>
             )}
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-2">
               <TierBadge tier={person.tier} />
+              {readiness.isReady && (
+                <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                  ✓ Campaign-ready
+                </span>
+              )}
             </div>
           </div>
           <div className="flex shrink-0 gap-2">
             <button
               onClick={() => setEditing(true)}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
+              className="min-h-11 flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 sm:flex-none dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
             >
               Edit
             </button>
             <button
               onClick={() => setLogging(true)}
-              className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+              className="min-h-11 flex-1 rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 sm:flex-none"
             >
               Log contact
             </button>
           </div>
         </div>
+
+        {/* Readiness — only while there's something left to finish. A finished
+            profile gets the chip in the header and nothing more. */}
+        {!readiness.isReady && (
+          <div className="mb-4">
+            <ReadinessPanel readiness={readiness} name={person.name} />
+            <button
+              onClick={() => setEditing(true)}
+              className="mt-2 w-full rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              Finish {person.name.split(" ")[0]}'s profile
+            </button>
+          </div>
+        )}
 
         {/* Health + stats */}
         <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-slate-800">
@@ -191,7 +208,7 @@ export function PersonPage() {
               Last contact: {daysSince === 0 ? "today" : `${daysSince}d ago`}
             </span>
           </div>
-          <HealthBar score={health} />
+          <HealthDots score={health} />
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
             <div>
               <p className="font-semibold text-slate-800 dark:text-slate-200">

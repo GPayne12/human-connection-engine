@@ -35,6 +35,35 @@ function NavItem({
   );
 }
 
+// Phone navigation lives at the bottom, within thumb reach, because the whole
+// point of the tailnet URL is using this one-handed next to LinkedIn and
+// Messages. The desktop keeps the header nav — see DECISIONS.md 2026-08-15.
+function TabItem({
+  to,
+  label,
+  exact,
+}: {
+  to: string;
+  label: string;
+  exact: boolean;
+}) {
+  return (
+    <NavLink
+      to={to}
+      end={exact}
+      className={({ isActive }) =>
+        `flex min-h-12 flex-1 items-center justify-center px-1 text-xs font-medium transition-colors ${
+          isActive
+            ? "text-blue-600 dark:text-blue-400"
+            : "text-slate-500 dark:text-slate-400"
+        }`
+      }
+    >
+      {label}
+    </NavLink>
+  );
+}
+
 export function Layout() {
   const { error, refresh } = useApp();
 
@@ -46,7 +75,7 @@ export function Layout() {
           <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
             HCE
           </span>
-          <nav className="flex gap-1">
+          <nav className="hidden gap-1 sm:flex">
             {NAV.map((n) => (
               <NavItem key={n.to} {...n} />
             ))}
@@ -65,10 +94,20 @@ export function Layout() {
         )}
       </header>
 
-      {/* Page content */}
-      <main className="flex-1">
+      {/* Page content. The bottom padding clears the tab bar on phones; the
+          bar is fixed, so without it the last card sits underneath. */}
+      <main className="flex-1 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:pb-0">
         <Outlet />
       </main>
+
+      {/* Bottom tab bar — phones only */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur sm:hidden dark:border-slate-700 dark:bg-slate-900/95">
+        <div className="flex items-stretch">
+          {NAV.map((n) => (
+            <TabItem key={n.to} {...n} />
+          ))}
+        </div>
+      </nav>
     </div>
   );
 }

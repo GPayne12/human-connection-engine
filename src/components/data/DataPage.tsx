@@ -133,7 +133,7 @@ export function DataPage() {
         <button
           onClick={handleExport}
           disabled={exporting}
-          className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+          className="min-h-11 w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50 sm:w-auto dark:bg-slate-100 dark:text-slate-900"
         >
           {exporting ? "Exporting…" : "Export JSON"}
         </button>

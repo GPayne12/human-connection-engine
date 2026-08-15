@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Maskable icon: Chrome crops installed-app icons to a platform shape
+       (circle, squircle, rounded square), so the glyph sits inside the safe
+       zone — the centre 80% — rather than filling the canvas. -->
+  <rect width="512" height="512" fill="#0f172a"/>
+  <text x="256" y="256" text-anchor="middle" dominant-baseline="central"
+        font-family="Helvetica, Arial, sans-serif" font-weight="900"
+        font-size="240" fill="#f8fafc">H</text>
+</svg>

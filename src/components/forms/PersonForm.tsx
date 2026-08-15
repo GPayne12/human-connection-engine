@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { upsertPerson } from "../../db";
+import { profileReadiness } from "../../engine";
+import { ReadinessPanel } from "../ui/ReadinessMeter";
 import type { Person, Tier } from "../../types";
 
 interface Props {
@@ -24,7 +26,6 @@ function parseChips(raw: string): string[] {
 
 export function PersonForm({ initial, onDone }: Props) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [pronouns, setPronouns] = useState(initial?.pronouns ?? "");
   const [role, setRole] = useState(initial?.role ?? "");
   const [organization, setOrganization] = useState(initial?.organization ?? "");
   const [tier, setTier] = useState<Tier>(initial?.tier ?? "active");
@@ -42,6 +43,21 @@ export function PersonForm({ initial, onDone }: Props) {
   // user's own words; it is never fabricated.
   const storyRequired = tier !== "dormant";
 
+  // Live against unsaved state, so the panel below moves as the form is filled
+  // — the gate is visible while it's being cleared, not only after saving.
+  const readiness = useMemo(
+    () =>
+      profileReadiness({
+        name,
+        role,
+        organization,
+        tier,
+        originStory,
+        tags: parseChips(tagsRaw),
+      }),
+    [name, role, organization, tier, originStory, tagsRaw],
+  );
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
@@ -49,7 +65,6 @@ export function PersonForm({ initial, onDone }: Props) {
     await upsertPerson({
       id: initial?.id ?? crypto.randomUUID(),
       name,
-      pronouns: pronouns || undefined,
       role: role || undefined,
       organization: organization || undefined,
       tier,
@@ -66,8 +81,8 @@ export function PersonForm({ initial, onDone }: Props) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="sm:col-span-2">
           <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
             Name <span className="text-red-500">*</span>
           </label>
@@ -76,17 +91,6 @@ export function PersonForm({ initial, onDone }: Props) {
             onChange={(e) => setName(e.target.value)}
             required
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
-          />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
-            Pronouns
-          </label>
-          <input
-            value={pronouns}
-            onChange={(e) => setPronouns(e.target.value)}
-            placeholder="they/them"
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-500"
           />
         </div>
         <div>
@@ -100,7 +104,7 @@ export function PersonForm({ initial, onDone }: Props) {
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-500"
           />
         </div>
-        <div className="col-span-2">
+        <div>
           <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
             Organization
           </label>
@@ -121,7 +125,7 @@ export function PersonForm({ initial, onDone }: Props) {
           {TIERS.map((t) => (
             <label
               key={t}
-              className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm transition-colors ${
+              className={`flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm transition-colors ${
                 tier === t
                   ? "border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20"
                   : "border-slate-200 hover:border-slate-300 dark:border-slate-700"
@@ -163,7 +167,8 @@ export function PersonForm({ initial, onDone }: Props) {
 
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
-          Shared context
+          Shared context{" "}
+          <span className="font-normal text-slate-400">(optional)</span>
         </label>
         <input
           value={sharedContextRaw}
@@ -183,11 +188,15 @@ export function PersonForm({ initial, onDone }: Props) {
           placeholder="mentor, investor, job-search (comma-separated)"
           className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-500"
         />
+        <p className="mt-1 text-xs text-slate-400">
+          At least one of your own. <code>linkedin-import</code> is provenance,
+          not a judgment — it doesn't count.
+        </p>
       </div>
 
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
-          Notes
+          Notes <span className="font-normal text-slate-400">(optional)</span>
         </label>
         <textarea
           value={notes}
@@ -198,12 +207,14 @@ export function PersonForm({ initial, onDone }: Props) {
         />
       </div>
 
+      <ReadinessPanel readiness={readiness} name={name} />
+
       <button
         type="submit"
         disabled={
           saving || !name.trim() || (storyRequired && !originStory.trim())
         }
-        className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        className="min-h-12 w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
       >
         {saving ? "Saving…" : initial ? "Save changes" : "Add person"}
       </button>

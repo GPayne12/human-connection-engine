@@ -5,12 +5,14 @@ import {
   deleteCampaignEntry,
   upsertCampaign,
   upsertCampaignEntry,
-  upsertPerson,
 } from "../../db";
 import {
   advanceCampaignStage,
   daysInCurrentStage,
+  isCampaignReady,
   isTerminalStage,
+  nearlyReady,
+  profileReadiness,
   InvalidStageTransitionError,
 } from "../../engine";
 import { useApp } from "../../context/AppContext";
@@ -98,6 +100,10 @@ function NewCampaignModal({ onDone }: { onDone: () => void }) {
   );
 }
 
+// Only campaign-ready people appear here (DECISIONS.md 2026-08-13). The list
+// is the gate: a half-known contact isn't offered and then rejected, they
+// simply aren't on the menu until the profile is finished. What's blocked is
+// stated plainly underneath, with the shortest route to unblocking it.
 function AddPersonModal({
   campaignId,
   people,
@@ -110,24 +116,19 @@ function AddPersonModal({
   onDone: () => void;
 }) {
   const [personId, setPersonId] = useState("");
-  const [originStory, setOriginStory] = useState("");
   const [saving, setSaving] = useState(false);
 
   const available = people.filter((p) => !existingPersonIds.has(p.id));
-  const selected = available.find((p) => p.id === personId);
-  // The origin-story toll gate (DECISIONS.md 2026-08-12): joining a campaign
-  // is the moment a person becomes real to the practice — the story gets
-  // written here, in the user's words, or the placement doesn't happen.
-  const needsStory = selected !== undefined && !selected.originStory.trim();
+  const eligible = available.filter(isCampaignReady);
+  const waiting = nearlyReady(available);
+  const oneFieldAway = waiting.filter(
+    (p) => profileReadiness(p).missing.length === 1,
+  ).length;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!personId) return;
-    if (needsStory && !originStory.trim()) return;
     setSaving(true);
-    if (needsStory && selected) {
-      await upsertPerson({ ...selected, originStory: originStory.trim() });
-    }
     await upsertCampaignEntry({
       id: crypto.randomUUID(),
       campaignId,
@@ -139,67 +140,79 @@ function AddPersonModal({
     onDone();
   }
 
+  const blockedNote = waiting.length > 0 && (
+    <p className="text-xs text-slate-500 dark:text-slate-400">
+      {waiting.length} {waiting.length === 1 ? "contact is" : "contacts are"}{" "}
+      held back by an unfinished profile
+      {oneFieldAway > 0 && ` — ${oneFieldAway} of them one field away`}.{" "}
+      <Link
+        to="/people?ready=no"
+        className="text-blue-500 hover:underline dark:text-blue-400"
+      >
+        Finish a profile →
+      </Link>
+    </p>
+  );
+
+  if (eligible.length === 0) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600 dark:text-slate-300">
+          {available.length === 0
+            ? "Everyone in the graph is already in this campaign."
+            : "No one is campaign-ready yet."}
+        </p>
+        {available.length > 0 && (
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            A board placement needs a whole person: name, role, org,
+            relationship, origin story, and at least one tag of your own.
+          </p>
+        )}
+        {blockedNote}
+        <Link
+          to="/people/new"
+          className="inline-block text-sm text-blue-500 hover:underline dark:text-blue-400"
+        >
+          Add a new person →
+        </Link>
+      </div>
+    );
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
         <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
-          Person
+          Person{" "}
+          <span className="font-normal text-slate-400">
+            ({eligible.length} campaign-ready)
+          </span>
         </label>
-        {available.length === 0 ? (
-          <p className="text-sm text-slate-400">
-            All contacts are already in this campaign.{" "}
-            <Link to="/people/new" className="text-blue-500 hover:underline">
-              Add a new person?
-            </Link>
-          </p>
-        ) : (
-          <select
-            value={personId}
-            onChange={(e) => {
-              setPersonId(e.target.value);
-              setOriginStory("");
-            }}
-            required
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
-          >
-            <option value="">Select…</option>
-            {available.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-                {p.organization ? ` · ${p.organization}` : ""}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
-      {needsStory && selected && (
-        <div>
-          <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">
-            Origin story first <span className="text-red-500">*</span>
-          </label>
-          <textarea
-            value={originStory}
-            onChange={(e) => setOriginStory(e.target.value)}
-            placeholder="How did you meet? What made this relationship matter?"
-            rows={2}
-            required
-            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:placeholder-slate-500"
-          />
-          <p className="mt-1 text-xs text-slate-400">
-            {selected.name} can't join a campaign without one — how you met is
-            the one thing this tool can't regenerate. Encrypted.
-          </p>
-        </div>
-      )}
-      {available.length > 0 && (
-        <button
-          type="submit"
-          disabled={saving || !personId || (needsStory && !originStory.trim())}
-          className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+        <select
+          value={personId}
+          onChange={(e) => setPersonId(e.target.value)}
+          required
+          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
         >
-          {saving ? "Adding…" : "Add to campaign"}
-        </button>
-      )}
+          <option value="">Select…</option>
+          {eligible.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+              {p.organization ? ` · ${p.organization}` : ""}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {blockedNote}
+
+      <button
+        type="submit"
+        disabled={saving || !personId}
+        className="w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+      >
+        {saving ? "Adding…" : "Add to campaign"}
+      </button>
     </form>
   );
 }
@@ -256,15 +269,15 @@ export function CampaignBoard() {
     <div className="flex h-full flex-col">
       {/* Toolbar */}
       <div className="border-b border-slate-200 px-4 py-3 dark:border-slate-700">
-        <div className="mx-auto flex max-w-6xl items-center gap-3">
-          <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 sm:gap-3">
+          <h1 className="w-full text-lg font-bold text-slate-900 sm:w-auto dark:text-slate-100">
             Campaigns
           </h1>
           {campaigns.length > 0 && (
             <select
               value={activeCampaign?.id ?? ""}
               onChange={(e) => setActiveCampaignId(e.target.value)}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
+              className="min-h-11 min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm sm:min-h-0 sm:flex-none dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
             >
               {campaigns.map((c) => (
                 <option key={c.id} value={c.id}>
@@ -273,20 +286,22 @@ export function CampaignBoard() {
               ))}
             </select>
           )}
-          <div className="flex-1" />
+          <div className="hidden flex-1 sm:block" />
           {activeCampaign && (
             <button
               onClick={() => setAddingPerson(true)}
-              className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
+              className="min-h-11 shrink-0 whitespace-nowrap rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 sm:min-h-0 dark:border-slate-600 dark:text-slate-400 dark:hover:bg-slate-700"
             >
-              + Add person
+              <span className="sm:hidden">+ Person</span>
+              <span className="hidden sm:inline">+ Add person</span>
             </button>
           )}
           <button
             onClick={() => setCreatingCampaign(true)}
-            className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 dark:bg-slate-100 dark:text-slate-900"
+            className="min-h-11 shrink-0 whitespace-nowrap rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 sm:min-h-0 dark:bg-slate-100 dark:text-slate-900"
           >
-            New campaign
+            <span className="sm:hidden">+ Campaign</span>
+            <span className="hidden sm:inline">New campaign</span>
           </button>
         </div>
       </div>
@@ -310,7 +325,7 @@ export function CampaignBoard() {
           </div>
         </div>
       ) : (
-        <div className="flex flex-1 gap-2 overflow-x-auto p-4">
+        <div className="flex flex-1 snap-x snap-mandatory gap-2 overflow-x-auto p-4 sm:snap-none">
           {STAGES.map((stage) => {
             const stageEntries = boardEntries.filter(
               (e) => e.currentStage === stage,
@@ -318,7 +333,11 @@ export function CampaignBoard() {
             return (
               <div
                 key={stage}
-                className={`flex w-44 shrink-0 flex-col rounded-xl p-2 ${STAGE_COLORS[stage]}`}
+                // An empty stage still has to be swiped past on a phone, so it
+                // collapses to a narrow marker instead of costing a full screen.
+                className={`flex shrink-0 snap-start flex-col rounded-xl p-2 sm:w-44 sm:max-w-none ${
+                  stageEntries.length === 0 ? "w-28" : "w-[78vw] max-w-72"
+                } ${STAGE_COLORS[stage]}`}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => {
                   e.preventDefault();
@@ -347,6 +366,7 @@ export function CampaignBoard() {
                         onDragStart={() => {
                           draggedEntryId.current = entry.id;
                         }}
+                        onMoveToStage={(to) => handleDrop(to, entry.id)}
                         onRemove={() => handleRemoveEntry(entry.id)}
                       />
                     );
@@ -399,15 +419,16 @@ function CampaignCard({
   entry,
   isDue,
   onDragStart,
+  onMoveToStage,
   onRemove,
 }: {
   person: Person;
   entry: CampaignEntry;
   isDue: boolean;
   onDragStart: () => void;
+  onMoveToStage: (stage: CampaignStage) => void;
   onRemove: () => void;
 }) {
-  const [showRemove, setShowRemove] = useState(false);
   const daysInStage = daysInCurrentStage(entry);
   const stale =
     !isTerminalStage(entry.currentStage) && daysInStage >= STALE_AFTER_DAYS;
@@ -417,13 +438,11 @@ function CampaignCard({
     <div
       draggable
       onDragStart={onDragStart}
-      onMouseEnter={() => setShowRemove(true)}
-      onMouseLeave={() => setShowRemove(false)}
-      className="relative cursor-grab rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm active:cursor-grabbing dark:border-slate-600 dark:bg-slate-800"
+      className="group relative cursor-grab rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm active:cursor-grabbing dark:border-slate-600 dark:bg-slate-800"
     >
       <Link
         to={`/people/${person.id}`}
-        className="block text-sm font-medium text-slate-800 hover:text-blue-600 dark:text-slate-200"
+        className="block pr-6 text-sm font-medium text-slate-800 hover:text-blue-600 dark:text-slate-200"
         onClick={(e) => e.stopPropagation()}
       >
         {person.name}
@@ -445,17 +464,35 @@ function CampaignCard({
           </span>
         )}
       </div>
-      {showRemove && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          className="absolute right-1.5 top-1.5 rounded p-0.5 text-xs text-slate-300 hover:text-red-400"
-        >
-          ✕
-        </button>
-      )}
+      {/* Touch devices never fire HTML5 drag events, so on phones the board
+          would be read-only. A native select is the moving mechanism there —
+          iOS renders it as a wheel picker, and it routes through the same
+          transition validation the drop handler uses. Desktop keeps dragging. */}
+      <select
+        aria-label={`Move ${person.name} to another stage`}
+        value={entry.currentStage}
+        onChange={(e) => onMoveToStage(e.target.value as CampaignStage)}
+        className="mt-2 min-h-9 w-full rounded border border-slate-200 bg-slate-50 px-1.5 py-1 text-xs text-slate-600 sm:hidden dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300"
+      >
+        {STAGES.map((s) => (
+          <option key={s} value={s}>
+            {STAGE_LABELS[s]}
+          </option>
+        ))}
+      </select>
+
+      {/* Visible by default on touch (no hover to reveal it), hover-gated on
+          pointer devices so the board stays clean. */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+        aria-label={`Remove ${person.name} from this campaign`}
+        className="absolute right-1 top-1 flex size-7 items-center justify-center rounded text-xs text-slate-300 hover:text-red-400 sm:opacity-0 sm:group-hover:opacity-100"
+      >
+        ✕
+      </button>
     </div>
   );
 }
