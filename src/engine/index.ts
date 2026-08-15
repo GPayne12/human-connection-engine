@@ -14,3 +14,12 @@ export {
   InvalidStageTransitionError,
 } from "./campaign";
 export { computeReciprocity } from "./reciprocity";
+export {
+  isCampaignReady,
+  meaningfulTags,
+  nearlyReady,
+  profileReadiness,
+  PROFILE_FIELD_LABELS,
+  REQUIRED_PROFILE_FIELDS,
+} from "./readiness";
+export type { ProfileDraft, ProfileField, ProfileReadiness } from "./readiness";

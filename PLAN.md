@@ -46,7 +46,7 @@ Layers 0–2 are the hardest intellectually and must happen within the Fable 5 w
 
 ```
 Person
-  id, name, pronouns?, role, organization
+  id, name, role, organization
   tier: 'inner' | 'active' | 'extended' | 'dormant'
   originStory: string          -- how you met; irreplaceable context
   sharedContext: string[]      -- ongoing shared threads (projects, interests)

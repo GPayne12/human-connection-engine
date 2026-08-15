@@ -15,6 +15,9 @@ dist-ssr
 # Compiled binary for tools/screen-ocr (rebuilt on demand from ocr.swift)
 tools/screen-ocr/.build/
 
+# Graph backups — real contact data, never committed (Law 5)
+backups/
+
 # Secrets and environment
 .env
 .env.*
