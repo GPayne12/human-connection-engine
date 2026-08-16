@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { addInteraction } from "../../db";
+import { newId } from "../../db/id";
 import { trackContactEvent } from "../../metrics";
 import type {
   InteractionDirection,
@@ -19,27 +20,38 @@ export function LogContactForm({ person, onDone }: Props) {
   const [summary, setSummary] = useState("");
   const [warmthDelta, setWarmthDelta] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
+  // A contact event is the north-star metric, so a failed save must never look
+  // like a successful one: catch surfaces it, finally releases the button.
+  // Without both, a throw here leaves "Saving…" on screen forever.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const interactionDate = new Date(date);
-    await addInteraction({
-      id: crypto.randomUUID(),
-      personId: person.id,
-      type,
-      direction,
-      date: interactionDate,
-      summary,
-      warmthDelta,
-      createdAt: new Date(),
-    });
-    trackContactEvent({
-      personId: person.id,
-      type,
-      timestamp: interactionDate,
-    });
-    onDone();
+    setError(null);
+    try {
+      const interactionDate = new Date(date);
+      await addInteraction({
+        id: newId(),
+        personId: person.id,
+        type,
+        direction,
+        date: interactionDate,
+        summary,
+        warmthDelta,
+        createdAt: new Date(),
+      });
+      trackContactEvent({
+        personId: person.id,
+        type,
+        timestamp: interactionDate,
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -137,6 +149,15 @@ export function LogContactForm({ person, onDone }: Props) {
           Did this contact deepen or cool the relationship?
         </p>
       </div>
+
+      {error && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300"
+        >
+          Couldn't log this contact — nothing was saved. {error}
+        </p>
+      )}
 
       <div className="flex gap-3 pt-1">
         <button

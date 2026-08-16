@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { upsertPerson } from "../../db";
+import { newId } from "../../db/id";
 import { profileReadiness } from "../../engine";
 import { ReadinessPanel } from "../ui/ReadinessMeter";
 import type { Person, Tier } from "../../types";
@@ -36,6 +37,7 @@ export function PersonForm({ initial, onDone }: Props) {
   const [tagsRaw, setTagsRaw] = useState(initial?.tags.join(", ") ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // The origin-story toll gate (DECISIONS.md 2026-08-12): dormant is the only
   // tier allowed to hold an unwritten origin story — bulk imports land there.
@@ -61,22 +63,29 @@ export function PersonForm({ initial, onDone }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    const now = new Date();
-    await upsertPerson({
-      id: initial?.id ?? crypto.randomUUID(),
-      name,
-      role: role || undefined,
-      organization: organization || undefined,
-      tier,
-      originStory,
-      sharedContext: parseChips(sharedContextRaw),
-      tags: parseChips(tagsRaw),
-      notes,
-      lastContactDate: initial?.lastContactDate,
-      createdAt: initial?.createdAt ?? now,
-      updatedAt: now,
-    });
-    onDone();
+    setError(null);
+    try {
+      const now = new Date();
+      await upsertPerson({
+        id: initial?.id ?? newId(),
+        name,
+        role: role || undefined,
+        organization: organization || undefined,
+        tier,
+        originStory,
+        sharedContext: parseChips(sharedContextRaw),
+        tags: parseChips(tagsRaw),
+        notes,
+        lastContactDate: initial?.lastContactDate,
+        createdAt: initial?.createdAt ?? now,
+        updatedAt: now,
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -208,6 +217,15 @@ export function PersonForm({ initial, onDone }: Props) {
       </div>
 
       <ReadinessPanel readiness={readiness} name={name} />
+
+      {error && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300"
+        >
+          Couldn't save this person — no changes were written. {error}
+        </p>
+      )}
 
       <button
         type="submit"

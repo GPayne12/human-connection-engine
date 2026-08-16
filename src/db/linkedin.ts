@@ -12,6 +12,7 @@
 // rules. Only real data from the file is carried: name, role, organization,
 // and a provenance line (profile URL / email / connected-on date) in notes.
 
+import { newId } from "./id";
 import type { Person, Tier } from "../types";
 
 export interface LinkedInConnection {
@@ -157,7 +158,7 @@ export function planLinkedInImport(
     seenInFile.add(key);
 
     people.push({
-      id: crypto.randomUUID(),
+      id: newId(),
       name,
       role: c.position || undefined,
       organization: c.company || undefined,

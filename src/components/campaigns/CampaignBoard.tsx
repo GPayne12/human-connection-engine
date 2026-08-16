@@ -6,6 +6,7 @@ import {
   upsertCampaign,
   upsertCampaignEntry,
 } from "../../db";
+import { newId } from "../../db/id";
 import {
   advanceCampaignStage,
   daysInCurrentStage,
@@ -49,19 +50,27 @@ function NewCampaignModal({ onDone }: { onDone: () => void }) {
   const [name, setName] = useState("");
   const [goal, setGoal] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    await upsertCampaign({
-      id: crypto.randomUUID(),
-      name,
-      goal,
-      notes: "",
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    onDone();
+    setError(null);
+    try {
+      await upsertCampaign({
+        id: newId(),
+        name,
+        goal,
+        notes: "",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -89,6 +98,14 @@ function NewCampaignModal({ onDone }: { onDone: () => void }) {
           className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100"
         />
       </div>
+      {error && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300"
+        >
+          Couldn't create this campaign — nothing was saved. {error}
+        </p>
+      )}
       <button
         type="submit"
         disabled={saving || !name.trim()}
@@ -117,6 +134,7 @@ function AddPersonModal({
 }) {
   const [personId, setPersonId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const available = people.filter((p) => !existingPersonIds.has(p.id));
   const eligible = available.filter(isCampaignReady);
@@ -129,15 +147,22 @@ function AddPersonModal({
     e.preventDefault();
     if (!personId) return;
     setSaving(true);
-    await upsertCampaignEntry({
-      id: crypto.randomUUID(),
-      campaignId,
-      personId,
-      currentStage: "research",
-      stageHistory: [],
-      updatedAt: new Date(),
-    });
-    onDone();
+    setError(null);
+    try {
+      await upsertCampaignEntry({
+        id: newId(),
+        campaignId,
+        personId,
+        currentStage: "research",
+        stageHistory: [],
+        updatedAt: new Date(),
+      });
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
   }
 
   const blockedNote = waiting.length > 0 && (
@@ -206,6 +231,14 @@ function AddPersonModal({
 
       {blockedNote}
 
+      {error && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/30 dark:text-red-300"
+        >
+          Couldn't add them to the campaign — nothing was saved. {error}
+        </p>
+      )}
       <button
         type="submit"
         disabled={saving || !personId}
