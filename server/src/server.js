@@ -24,6 +24,66 @@ const HOST = process.env.HOST || "127.0.0.1";
 const UI_DIST = process.env.HCE_UI_DIST || path.resolve(__dirname, "../../dist");
 const UI_INDEX = path.join(UI_DIST, "index.html");
 
+// ---- built-UI freshness -----------------------------------------------------
+//
+// dist/ is built by hand, and this process serves whatever happens to be
+// sitting there. So editing src/ without rebuilding leaves every other device
+// on an older app than the one in the repo — silently, and for as long as it
+// takes someone to notice behaviour that disagrees with the code. Comparing
+// mtimes is enough to turn that into something the startup log and
+// /api/health can both say out loud.
+const REPO_ROOT = path.resolve(__dirname, "../..");
+const UI_SOURCES = ["src", "public", "index.html", "vite.config.ts"];
+const FRESHNESS_TTL_MS = 10_000;
+
+const STALE_UI_WARNING =
+  "STALE UI: dist/ is older than the sources it was built from — other " +
+  "devices are being served an out-of-date app. Run `npm run deploy`.";
+
+function newestMtime(target) {
+  let newest = 0;
+  const visit = (p) => {
+    let stat;
+    try {
+      stat = fs.statSync(p);
+    } catch {
+      return; // missing paths simply do not contribute
+    }
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(p)) visit(path.join(p, entry));
+    } else if (stat.mtimeMs > newest) {
+      newest = stat.mtimeMs;
+    }
+  };
+  visit(target);
+  return newest;
+}
+
+let freshnessCache = { at: 0, value: null };
+
+function uiFreshness() {
+  const now = Date.now();
+  if (freshnessCache.value && now - freshnessCache.at < FRESHNESS_TTL_MS) {
+    return freshnessCache.value;
+  }
+
+  const built = fs.existsSync(UI_INDEX);
+  const builtAt = built ? newestMtime(UI_DIST) : 0;
+  const sourceAt = UI_SOURCES.reduce(
+    (newest, rel) => Math.max(newest, newestMtime(path.join(REPO_ROOT, rel))),
+    0,
+  );
+
+  const value = {
+    built,
+    stale: built && sourceAt > builtAt,
+    builtAt: builtAt ? new Date(builtAt).toISOString() : null,
+    sourceChangedAt: sourceAt ? new Date(sourceAt).toISOString() : null,
+  };
+  freshnessCache = { at: now, value };
+  return value;
+}
+
 const app = express();
 
 // The bundle is ~395kB uncompressed and ~115kB gzipped. The tailnet reaches
@@ -56,7 +116,9 @@ function asyncRoute(handler) {
 // would return JSON instead of the app.
 const api = express.Router();
 
-api.get("/health", (_req, res) => res.json({ ok: true }));
+// `ui` is here so a stale build is visible from whichever device is being
+// served the stale copy, not just from GDesk's log.
+api.get("/health", (_req, res) => res.json({ ok: true, ui: uiFreshness() }));
 
 // ---- Person (encrypted fields live only in this process) ------------------
 
@@ -322,49 +384,99 @@ app.use((err, _req, res, _next) => {
 //
 // This is the same audience as before: the tailscale0 interface only, never
 // 0.0.0.0. The LAN still cannot see this service.
-function tailscaleIPv4() {
-  if (process.env.HCE_NO_TAILNET_BIND) return undefined;
-  try {
-    const { execFileSync } = require("node:child_process");
-    const bin = ["/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale"].find(
-      (p) => fs.existsSync(p),
-    );
-    if (!bin) return undefined;
-    const out = execFileSync(bin, ["ip", "-4"], {
-      encoding: "utf8",
-      timeout: 4000,
-    });
+function tailscaleIPv4(done) {
+  if (process.env.HCE_NO_TAILNET_BIND) return done(undefined);
+  const { execFile } = require("node:child_process");
+  const bin = ["/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale"].find(
+    (p) => fs.existsSync(p),
+  );
+  if (!bin) return done(undefined);
+  execFile(bin, ["ip", "-4"], { encoding: "utf8", timeout: 4000 }, (err, out) => {
+    if (err) return done(undefined);
     const ip = out.trim().split("\n")[0]?.trim();
-    return /^\d+\.\d+\.\d+\.\d+$/.test(ip) ? ip : undefined;
-  } catch {
-    return undefined;
-  }
+    done(/^\d+\.\d+\.\d+\.\d+$/.test(ip) ? ip : undefined);
+  });
+}
+
+// Keeping the tailnet socket bound is a supervised loop rather than one
+// attempt at startup, because a single attempt loses a race it cannot detect.
+// The LaunchAgent is RunAtLoad, so after a reboot it usually starts before
+// tailscaled has configured the interface: `tailscale ip` answers with
+// nothing, the bind never happens, and the process goes on serving loopback
+// in perfect health — so KeepAlive sees no reason to restart it and nothing
+// is logged as an error. GLap simply loses the service until a human notices
+// and restarts it by hand.
+//
+// Re-checking on a timer also picks up an address that changes underneath us
+// (a machine rename, a re-auth, tailscaled restarting) without a restart.
+const TAILNET_POLL_BOUND_MS = 60_000;
+const TAILNET_POLL_UNBOUND_MS = 10_000;
+
+let tailnetServer = null;
+let tailnetIP = null;
+
+function scheduleTailnetSync() {
+  const timer = setTimeout(
+    syncTailnetBind,
+    tailnetIP ? TAILNET_POLL_BOUND_MS : TAILNET_POLL_UNBOUND_MS,
+  );
+  // Never hold the process open on this timer's account; the HTTP server is
+  // what keeps us alive.
+  if (timer.unref) timer.unref();
+}
+
+function syncTailnetBind() {
+  tailscaleIPv4((ip) => {
+    const wanted = ip && ip !== HOST ? ip : null;
+    if (wanted === tailnetIP) return scheduleTailnetSync();
+
+    if (tailnetServer) {
+      const previous = tailnetIP;
+      tailnetServer.close();
+      tailnetServer = null;
+      tailnetIP = null;
+      console.log(`Released the tailnet socket on ${previous}.`);
+    }
+
+    if (!wanted) return scheduleTailnetSync();
+
+    // Same Express app, second socket — not a second process, so there is
+    // exactly one writer to the graph file.
+    const socket = app.listen(PORT, wanted);
+    let settled = false;
+
+    socket.once("listening", () => {
+      settled = true;
+      tailnetServer = socket;
+      tailnetIP = wanted;
+      console.log(`Also listening on the tailnet: http://${wanted}:${PORT}`);
+      scheduleTailnetSync();
+    });
+
+    socket.once("error", (err) => {
+      // EADDRNOTAVAIL is the ordinary reboot case — tailscaled has not brought
+      // the interface up yet. Stay in the loop and try again shortly.
+      console.log(`Could not bind the tailnet address ${wanted}: ${err.message}`);
+      if (!settled) scheduleTailnetSync();
+    });
+  });
 }
 
 if (require.main === module) {
   app.listen(PORT, HOST, () => {
     console.log(`HCE graph server listening on http://${HOST}:${PORT}`);
     console.log(`Data dir: ${store.DATA_DIR}`);
-    if (fs.existsSync(UI_INDEX)) {
+    const ui = uiFreshness();
+    if (ui.built) {
       console.log(`Serving built UI from ${UI_DIST}`);
+      if (ui.stale) console.log(STALE_UI_WARNING);
     } else {
       console.log(
         `No built UI at ${UI_DIST} — API only. Run \`npm run build\` in the repo root to serve the app from this process.`,
       );
     }
 
-    const tsIP = tailscaleIPv4();
-    if (tsIP && tsIP !== HOST) {
-      // Same Express app, second socket — not a second process, so there is
-      // exactly one writer to the graph file.
-      app
-        .listen(PORT, tsIP, () => {
-          console.log(`Also listening on the tailnet: http://${tsIP}:${PORT}`);
-        })
-        .on("error", (err) => {
-          console.log(`Could not bind the tailnet address ${tsIP}: ${err.message}`);
-        });
-    }
+    syncTailnetBind();
   });
 }
 
