@@ -314,6 +314,33 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: err.message });
 });
 
+// This machine's Tailscale address, if tailscaled is up. Listening on it in
+// addition to loopback gives the phone a URL that needs neither MagicDNS nor
+// `tailscale serve` — which matters because a name that will not resolve and a
+// host that is genuinely down look identical from a phone, and because
+// `tailscale serve` routes on the Host header, so a bare IP 404s against it.
+//
+// This is the same audience as before: the tailscale0 interface only, never
+// 0.0.0.0. The LAN still cannot see this service.
+function tailscaleIPv4() {
+  if (process.env.HCE_NO_TAILNET_BIND) return undefined;
+  try {
+    const { execFileSync } = require("node:child_process");
+    const bin = ["/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale"].find(
+      (p) => fs.existsSync(p),
+    );
+    if (!bin) return undefined;
+    const out = execFileSync(bin, ["ip", "-4"], {
+      encoding: "utf8",
+      timeout: 4000,
+    });
+    const ip = out.trim().split("\n")[0]?.trim();
+    return /^\d+\.\d+\.\d+\.\d+$/.test(ip) ? ip : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 if (require.main === module) {
   app.listen(PORT, HOST, () => {
     console.log(`HCE graph server listening on http://${HOST}:${PORT}`);
@@ -324,6 +351,19 @@ if (require.main === module) {
       console.log(
         `No built UI at ${UI_DIST} — API only. Run \`npm run build\` in the repo root to serve the app from this process.`,
       );
+    }
+
+    const tsIP = tailscaleIPv4();
+    if (tsIP && tsIP !== HOST) {
+      // Same Express app, second socket — not a second process, so there is
+      // exactly one writer to the graph file.
+      app
+        .listen(PORT, tsIP, () => {
+          console.log(`Also listening on the tailnet: http://${tsIP}:${PORT}`);
+        })
+        .on("error", (err) => {
+          console.log(`Could not bind the tailnet address ${tsIP}: ${err.message}`);
+        });
     }
   });
 }

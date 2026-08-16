@@ -8,38 +8,36 @@
 // Dates travel as ISO strings; callers are responsible for reviving them
 // (src/db/dates.ts) since this layer only knows about the wire shape.
 
-// Port that `tailscale serve --http=8199` proxies to the graph service. The
-// service itself never leaves 127.0.0.1:5199 — Tailscale is what carries it to
-// the phone and GLap, so the graph is reachable by George's devices and nothing
-// else on the network.
-const TAILNET_GRAPH_PORT = 8199;
+// Port the graph service listens on, for the development case only.
+const GRAPH_PORT = 5199;
 
-// The graph lives on whichever machine served this page. On GDesk that is
-// loopback; opened over the tailnet it is the MagicDNS host in the address bar.
-// Resolving it from window.location instead of a build-time constant means the
-// desktop keeps working with Tailscale down, and the phone needs no separate
-// build. VITE_HCE_SERVER_URL still overrides both.
 // Data routes live under /api; the server serves the built app at /.
+//
+// The production bundle is only ever served BY the graph service, so the API is
+// always same-origin — whether that origin is loopback, the tailnet IP, or the
+// MagicDNS name behind `tailscale serve`. Keying off the build mode instead of
+// sniffing the port is what makes every one of those work without enumerating
+// them, and same-origin means no CORS preflight on writes.
+//
+// VITE_HCE_SERVER_URL still overrides everything.
 function defaultBaseUrl(): string {
-  if (typeof window === "undefined") return "http://127.0.0.1:5199/api";
+  if (typeof window === "undefined")
+    return `http://127.0.0.1:${GRAPH_PORT}/api`;
 
-  const { protocol, hostname, port } = window.location;
+  const { protocol, hostname, origin } = window.location;
+
+  if (!import.meta.env.DEV) return `${origin}/api`;
+
+  // Vite dev server. On loopback the graph is a separate process on 5199; over
+  // the tailnet it is the same host, on the port the service binds directly.
   const isLoopback =
     hostname === "localhost" ||
     hostname === "127.0.0.1" ||
     hostname === "[::1]" ||
     hostname === "::1";
 
-  // Vite's dev server on loopback — the graph is a separate process.
-  if (isLoopback) return "http://127.0.0.1:5199/api";
-
-  // Served by the graph server itself over the tailnet: same origin, which
-  // means no CORS preflight on any write.
-  if (port === String(TAILNET_GRAPH_PORT))
-    return `${protocol}//${hostname}:${port}/api`;
-
-  // Served by Vite over the tailnet (development from the phone or GLap).
-  return `${protocol}//${hostname}:${TAILNET_GRAPH_PORT}/api`;
+  if (isLoopback) return `http://127.0.0.1:${GRAPH_PORT}/api`;
+  return `${protocol}//${hostname}:${GRAPH_PORT}/api`;
 }
 
 const BASE_URL =
